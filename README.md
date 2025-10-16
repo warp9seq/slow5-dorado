@@ -1,3 +1,57 @@
+# slow5-dorado
+
+This is our fork of [Dorado](https://github.com/nanoporetech/dorado) that supports [S/BLOW5](https://www.nature.com/articles/s41587-021-01147-4).
+Also check out our [buttery-eel](https://github.com/Psy-Fer/buttery-eel) - a wrapper for dorado and guppy basecallers.
+
+## Features
+
+* [S/BLOW5](https://www.nature.com/articles/s41587-021-01147-4) support for highest basecalling performance.
+* [BLOW5 Vs POD5](https://www.biorxiv.org/content/10.1101/2025.06.30.662478v1) The enduring advantages of the SLOW5 file format for raw nanopore sequencing data.
+
+If you encounter any problems building or running sow5-dorado please [report an issue](https://github.com/hiruna72/slow5-dorado/issues).
+
+## Installation
+
+Binaries are provided for Linux x64 under [Relases](https://github.com/hiruna72/slow5-dorado/releases/).
+
+```
+VERSION=v0.9.6
+wget https://github.com/hiruna72/slow5-dorado/releases/download/$VERSION/slow5-dorado-$VERSION-x86_64-linux.tar.gz && slow5-dorado-$VERSION-x86_64-linux.tar.gz && cd slow5-dorado-$VERSION-x86_64-linux/bin
+./slow5-dorado --version
+```
+
+## Running
+
+To run slow5-dorado, download a model and point it to S/BLOW5 files.
+
+```
+MODEL="dna_r10.4.1_e8.2_400bps_hac@v4.0.0"
+$ slow5-dorado download --model $MODEL
+$ slow5-dorado basecaller $MODEL BLOW5s/ > calls.bam # blow5 directory
+$ slow5-dorado basecaller $MODEL merged.blow5 >calls.bam # a single BLOW5 file
+```
+
+To call modifications simply add `--modified-bases`.
+
+```
+$ slow5-dorado basecaller $MODEL BLOW5s/ --modified-bases 5mCG_5hmCG > calls.sam
+```
+
+Stereo Duplex Calling:
+
+```
+$ slow5-dorado duplex $MODEL merged.blow5 > duplex.sam
+```
+
+## Platforms
+
+slow5-dorado has been tested on the following systems:
+
+| Platform | GPU/CPU                      |
+| -------- | ---------------------------- |
+| Linux    | (G)V100, A100, 3090, 3070    |
+
+
 # Dorado
 
 Dorado is a high-performance, easy-to-use, open source basecaller for Oxford Nanopore reads.

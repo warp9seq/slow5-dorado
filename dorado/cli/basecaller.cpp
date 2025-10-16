@@ -120,7 +120,7 @@ void set_dorado_basecaller_args(utils::arg_parse::ArgParser& parser, int& verbos
     parser.visible.add_argument("model").help(
             "Model selection {fast,hac,sup}@v{version} for automatic model selection including "
             "modbases, or path to existing model directory.");
-    parser.visible.add_argument("data").help("The data directory or file (POD5/FAST5 format).");
+    parser.visible.add_argument("data").help("The data directory or file (POD5/FAST5/SLOW5/BLOW5 format).");
     {
         // Default "Optional arguments" group
         parser.visible.add_argument("-v", "--verbose")
@@ -145,7 +145,15 @@ void set_dorado_basecaller_args(utils::arg_parse::ArgParser& parser, int& verbos
         parser.visible.add_argument("-r", "--recursive")
                 .default_value(false)
                 .implicit_value(true)
-                .help("Recursively scan through directories to load FAST5 and POD5 files.");
+                .help("Recursively scan through directories to load FAST5 and POD5 and SLOW5/BLOW5 files.");
+        parser.visible.add_argument("--slow5_threads")
+            .default_value(default_parameters.slow5_threads)
+            .scan<'i', int32_t>()
+            .help("Number of slow5 threads used to read SLOW5/BLOW5");
+        parser.visible.add_argument("--slow5_batchsize")
+            .default_value(default_parameters.slow5_batchsize)
+            .scan<'i', int64_t>()
+            .help("Batchsize used to read SLOW5/BLOW5");
         parser.visible.add_argument("-l", "--read-ids")
                 .help("A file with a newline-delimited list of reads to basecall. If not provided, "
                       "all reads will be basecalled.")
@@ -322,6 +330,8 @@ void setup(const std::vector<std::string>& args,
            size_t min_qscore,
            const std::string& read_list_file_path,
            const alignment::Minimap2Options& aligner_options,
+           int32_t slow5_threads,
+           int64_t slow5_batchsize,
            bool skip_model_compatibility_check,
            const std::string& dump_stats_file,
            const std::string& dump_stats_filter,
@@ -617,7 +627,7 @@ void setup(const std::vector<std::string>& args,
             kStatsPeriod, stats_reporters, stats_callables, max_stats_records);
 
     DataLoader loader(*pipeline, "cpu", thread_allocations.loader_threads, max_reads, read_list,
-                      reads_already_processed);
+                      reads_already_processed, slow5_threads, slow5_batchsize);
 
     auto func = [client_info](ReadCommon& read) { read.client_info = client_info; };
     loader.add_read_initialiser(func);
@@ -908,6 +918,7 @@ int basecaller(int argc, char* argv[]) {
               modbase_params, std::move(hts_file), parser.visible.get<bool>("--emit-moves"),
               parser.visible.get<int>("--max-reads"), parser.visible.get<int>("--min-qscore"),
               parser.visible.get<std::string>("--read-ids"), *minimap_options,
+              parser.visible.get<int32_t>("--slow5_threads"), parser.visible.get<int64_t>("--slow5_batchsize"),
               parser.hidden.get<bool>("--skip-model-compatibility-check"),
               parser.hidden.get<std::string>("--dump_stats_file"),
               parser.hidden.get<std::string>("--dump_stats_filter"), run_batchsize_benchmarks,

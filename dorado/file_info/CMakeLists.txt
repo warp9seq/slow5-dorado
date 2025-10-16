@@ -13,6 +13,7 @@ PRIVATE
     vbz_hdf_plugin
     ${ZLIB_LIBRARIES}
     HighFive::Include
+    slow5_lib
 )
 
 enable_warnings_as_errors(dorado_file_info)
