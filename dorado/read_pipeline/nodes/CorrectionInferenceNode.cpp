@@ -25,10 +25,15 @@
 #include <vector>
 
 #if DORADO_CUDA_BUILD
+#if DORADO_ROCM_BUILD
+#include <c10/hip/HIPCachingAllocator.h>
+#include <c10/hip/HIPGuard.h>
+#else
 #include "torch_utils/cuda_utils.h"
 
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#endif
 #endif
 
 #if DORADO_CUDA_BUILD
@@ -170,10 +175,19 @@ void CorrectionInferenceNode::infer_fn(const std::string& device_str, int mtx_id
 #if DORADO_CUDA_BUILD
     c10::optional<c10::Stream> stream;
     if (device.is_cuda()) {
+#if DORADO_ROCM_BUILD
+        c10::hip::HIPGuard device_guard(device);
+        stream = c10::hip::getStreamFromPool(false, device.index());
+#else
         c10::cuda::CUDAGuard device_guard(device);
         stream = c10::cuda::getStreamFromPool(false, device.index());
+#endif
     }
+#if DORADO_ROCM_BUILD
+    c10::hip::OptionalHIPStreamGuard guard(stream);
+#else
     c10::cuda::OptionalCUDAStreamGuard guard(stream);
+#endif
 #endif
 
     at::InferenceMode infer_guard;
@@ -259,8 +273,13 @@ void CorrectionInferenceNode::infer_fn(const std::string& device_str, int mtx_id
             output = module.forward(inputs);
         } catch (std::runtime_error& e) {
 #if DORADO_CUDA_BUILD
+#if DORADO_ROCM_BUILD
+            spdlog::warn("Caught Torch error '{}', clearing HIP cache and retrying.", e.what());
+            c10::hip::HIPCachingAllocator::emptyCache();
+#else
             spdlog::warn("Caught Torch error '{}', clearing CUDA cache and retrying.", e.what());
             c10::cuda::CUDACachingAllocator::emptyCache();
+#endif
             output = module.forward(inputs);
 #else
             throw e;
