@@ -5,11 +5,18 @@
 #include "utils/math_utils.h"
 
 #include <ATen/Functions.h>
+
+#if DORADO_ROCM_BUILD
+#include <c10/hip/HIPGuard.h>
+#include <hip/hip_runtime.h>
+#include <hipblas/hipblas.h>
+#else
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
 #include <cuda_runtime_api.h>
+#endif
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -37,7 +44,11 @@ const std::string_view USAGE_HELP{"CUDA device string format: \"cuda:0,...,N\" o
  * Wrapper around CUDA events to measure GPU timings.
  */
 class CUDATimer {
+#if DORADO_ROCM_BUILD
+    hipEvent_t m_start, m_stop;
+#else
     cudaEvent_t m_start, m_stop;
+#endif
 
     CUDATimer(const CUDATimer &) = delete;
     CUDATimer &operator=(const CUDATimer &) = delete;
@@ -48,14 +59,22 @@ public:
      * The timer will start once all previously submitted CUDA work
      * has completed on the active stream.
      */
+#if DORADO_ROCM_BUILD
+    void start() { handle_cuda_result(hipEventRecord(m_start)); }
+#else
     void start() { handle_cuda_result(cudaEventRecord(m_start)); }
+#endif
 
     /**
      * Mark the end of a profiling section.
      * The timer will stop once all previously submitted CUDA work
      * has completed on the active stream.
      */
+#if DORADO_ROCM_BUILD
+    void stop() { handle_cuda_result(hipEventRecord(m_stop)); }
+#else
     void stop() { handle_cuda_result(cudaEventRecord(m_stop)); }
+#endif
 
     /**
      * Get the time spent on the GPU between the begin and end markers.
@@ -63,19 +82,35 @@ public:
      * has been reached on the active stream.
      */
     float result_ms() {
+#if DORADO_ROCM_BUILD
+        handle_cuda_result(hipEventSynchronize(m_stop));
+        float ms = 0;
+        handle_cuda_result(hipEventElapsedTime(&ms, m_start, m_stop));
+#else
         handle_cuda_result(cudaEventSynchronize(m_stop));
         float ms = 0;
         handle_cuda_result(cudaEventElapsedTime(&ms, m_start, m_stop));
+#endif
         return ms;
     }
 
     CUDATimer() {
+#if DORADO_ROCM_BUILD
+        handle_cuda_result(hipEventCreate(&m_start));
+        handle_cuda_result(hipEventCreate(&m_stop));
+#else
         handle_cuda_result(cudaEventCreate(&m_start));
         handle_cuda_result(cudaEventCreate(&m_stop));
+#endif
     }
     ~CUDATimer() {
+#if DORADO_ROCM_BUILD
+        handle_cuda_result(hipEventDestroy(m_start));
+        handle_cuda_result(hipEventDestroy(m_stop));
+#else
         handle_cuda_result(cudaEventDestroy(m_start));
         handle_cuda_result(cudaEventDestroy(m_stop));
+#endif
     }
 };
 
@@ -98,12 +133,17 @@ MatmulMode get_cuda_matmul_fp16_mode() {
 
     // torch::matmul() is a bit slower than cublasGemmEx() on A100 and V100, and 2x slower on TX2
     // but an order of magnitude faster on 1080 Ti (sm61)
+#if DORADO_ROCM_BUILD
+    // ROCm uses hipBLAS; default to TORCH to avoid extra hipBLAS dependency.
+    return MatmulMode::TORCH;
+#else
     cudaDeviceProp *prop = at::cuda::getCurrentDeviceProperties();
     bool is_sm61 = (prop->major == 6 && prop->minor == 1);
     if (is_sm61) {
         return MatmulMode::TORCH;
     }
     return MatmulMode::CUBLAS;
+#endif
 }
 
 }  // namespace
@@ -272,6 +312,15 @@ std::vector<CUDADeviceInfo> get_cuda_device_info(const std::string &device_strin
             continue;
         }
 
+#if DORADO_ROCM_BUILD
+        hipSetDevice(device_id);
+        hipMemGetInfo(&device_info.free_mem, &device_info.total_mem);
+        hipDeviceGetAttribute(&device_info.compute_cap_major, hipDeviceAttributeComputeCapabilityMajor,
+                               device_id);
+        hipDeviceGetAttribute(&device_info.compute_cap_minor, hipDeviceAttributeComputeCapabilityMinor,
+                               device_id);
+        hipGetDeviceProperties(&device_info.device_properties, device_id);
+#else
         cudaSetDevice(device_id);
         cudaMemGetInfo(&device_info.free_mem, &device_info.total_mem);
         cudaDeviceGetAttribute(&device_info.compute_cap_major, cudaDevAttrComputeCapabilityMajor,
@@ -279,9 +328,14 @@ std::vector<CUDADeviceInfo> get_cuda_device_info(const std::string &device_strin
         cudaDeviceGetAttribute(&device_info.compute_cap_minor, cudaDevAttrComputeCapabilityMinor,
                                device_id);
         cudaGetDeviceProperties(&device_info.device_properties, device_id);
+#endif
 
         if (!device_info.in_use) {
+#if DORADO_ROCM_BUILD
+            hipDeviceReset();
+#else
             cudaDeviceReset();
+#endif
         }
         results.push_back(device_info);
     }
@@ -321,6 +375,10 @@ std::unique_lock<std::mutex> acquire_gpu_lock(int gpu_index, bool use_lock) {
 
 // This might come in handy for tracking down where big Torch allocations happen
 void print_cuda_alloc_info(const std::string &label) {
+#if DORADO_ROCM_BUILD
+    // c10::cuda::CUDACachingAllocator stats not available in ROCm PyTorch builds.
+    spdlog::debug("print_cuda_alloc_info ({}): not supported on ROCm build", label);
+#else
     auto stats = c10::cuda::CUDACachingAllocator::getDeviceStats(0);
     auto print_stat_array = [](const auto &stat, const std::string &lbl) {
         constexpr float gig = 1024.f * 1024.f * 1024.f;
@@ -333,18 +391,37 @@ void print_cuda_alloc_info(const std::string &label) {
     print_stat_array(stats.active_bytes, "Act");
     print_stat_array(stats.inactive_split_bytes, "In");
     std::cerr << '\n' << std::flush;
+#endif
 }
 
 // Note that in general the torch caching allocator may be consuming
 // significant memory that could be freed if required.
 size_t available_memory(torch::Device device) {
     size_t free, total;
+#if DORADO_ROCM_BUILD
+    c10::hip::HIPGuard device_guard(device);
+    hipMemGetInfo(&free, &total);
+#else
     c10::cuda::CUDAGuard device_guard(device);
     cudaMemGetInfo(&free, &total);
+#endif
     return free;
 }
 
 void handle_cuda_result(int cuda_result) {
+#if DORADO_ROCM_BUILD
+    if (cuda_result == hipSuccess) {
+        return;
+    }
+    if (cuda_result == hipErrorNoBinaryForGpu) {
+        throw std::runtime_error(
+                std::string("Dorado cannot support the ROCm device being used,"
+                            " as the compute capability version is incompatible."));
+    } else {
+        throw std::runtime_error(std::string("HIP error: ") +
+                                 hipGetErrorString(hipError_t(cuda_result)));
+    }
+#else
     if (cuda_result == cudaSuccess) {
         return;
     }
@@ -357,6 +434,7 @@ void handle_cuda_result(int cuda_result) {
         throw std::runtime_error(std::string("Cuda error: ") +
                                  cudaGetErrorString(cudaError_t(cuda_result)));
     }
+#endif
 }
 
 namespace details {
@@ -391,6 +469,19 @@ void matmul_f16_cublas(const at::Tensor &A, const at::Tensor &B, at::Tensor &C) 
     assert(A.size(0) == C.size(0));  // M
     assert(B.size(1) == C.size(1));  // N
     assert(A.size(1) == B.size(0));  // K
+#if DORADO_ROCM_BUILD
+    auto res = hipblasGemmEx(
+            reinterpret_cast<hipblasHandle_t>(at::cuda::getCurrentCUDABlasHandle()),
+            HIPBLAS_OP_N, HIPBLAS_OP_N,
+            int(B.size(1)), int(A.size(0)), int(A.size(1)), &HALF_ONE, B.data_ptr(),
+            HIPBLAS_R_16F, int(B.stride(0)), A.data_ptr(), HIPBLAS_R_16F,
+            int(A.stride(0)), &HALF_ZERO, C.data_ptr(), HIPBLAS_R_16F,
+            int(C.stride(0)), HIPBLAS_R_16F, HIPBLAS_GEMM_DEFAULT);
+    if (res != HIPBLAS_STATUS_SUCCESS) {
+        spdlog::error("hipBLAS error {}", int(res));
+        exit(EXIT_FAILURE);
+    }
+#else
     auto res = cublasGemmEx(at::cuda::getCurrentCUDABlasHandle(), CUBLAS_OP_N, CUBLAS_OP_N,
                             int(B.size(1)), int(A.size(0)), int(A.size(1)), &HALF_ONE, B.data_ptr(),
                             CUDA_R_16F, int(B.stride(0)), A.data_ptr(), CUDA_R_16F,
@@ -400,6 +491,7 @@ void matmul_f16_cublas(const at::Tensor &A, const at::Tensor &B, at::Tensor &C) 
         spdlog::error("CuBLAS error {}", int(res));
         exit(EXIT_FAILURE);
     }
+#endif
 }
 
 void matmul_f16_torch(const at::Tensor &A, const at::Tensor &B, at::Tensor &C) {

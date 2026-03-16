@@ -1,6 +1,10 @@
 #pragma once
 
+#if DORADO_ROCM_BUILD
+#include <hip/hip_runtime.h>
+#else
 #include <cuda_runtime.h>
+#endif
 #include <torch/torch.h>
 
 #include <mutex>
@@ -32,7 +36,11 @@ struct CUDADeviceInfo {
     size_t free_mem, total_mem;
     int device_id;
     int compute_cap_major, compute_cap_minor;
+#if DORADO_ROCM_BUILD
+    hipDeviceProp_t device_properties;
+#else
     cudaDeviceProp device_properties;
+#endif
     bool in_use;
 };
 

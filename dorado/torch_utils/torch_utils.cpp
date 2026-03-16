@@ -80,7 +80,9 @@ void set_torch_allocator_max_split_size() {
     }
 
 #if DORADO_ROCM_BUILD
-    c10::hip::HIPCachingAllocator::setAllocatorSettings(settings);
+    setenv("PYTORCH_HIP_ALLOC_CONF", settings.c_str(), 1);
+    //todo hm: this could be wrong
+    //c10::hip::HIPCachingAllocator::setAllocatorSettings(settings);
 #else
     c10::cuda::CUDACachingAllocator::setAllocatorSettings(settings);
 #endif
