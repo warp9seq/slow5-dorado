@@ -10,6 +10,7 @@
 #include "utils/thread_utils.h"
 
 #if DORADO_ROCM_BUILD
+#include <c10/hip/HIPCachingAllocator.h>
 #include <c10/hip/HIPGuard.h>
 #include <c10/hip/HIPStream.h>
 #else
@@ -156,10 +157,11 @@ CudaCaller::CudaCaller(const BasecallerCreationParams &params)
 
 #if DORADO_ROCM_BUILD
     c10::hip::HIPGuard device_guard(m_options.device());
+    c10::hip::HIPCachingAllocator::emptyCache();
 #else
     c10::cuda::CUDAGuard device_guard(m_options.device());
-#endif
     c10::cuda::CUDACachingAllocator::emptyCache();
+#endif
 
     auto [crfmodel_bytes_per_ct, decode_bytes_per_ct] = calculate_memory_requirements();
 
@@ -323,10 +325,11 @@ void CudaCaller::determine_batch_dims(const BasecallerCreationParams &params) {
 
 #if DORADO_ROCM_BUILD
     c10::hip::HIPGuard device_guard(m_options.device());
+    c10::hip::HIPCachingAllocator::emptyCache();
 #else
     c10::cuda::CUDAGuard device_guard(m_options.device());
-#endif
     c10::cuda::CUDACachingAllocator::emptyCache();
+#endif
     int64_t available = utils::available_memory(m_options.device());
     spdlog::debug("{} memory available: {:.2f}GB", m_device, available / GB);
     const int batch_granularity = get_batch_size_granularity(m_config);
@@ -536,7 +539,11 @@ void CudaCaller::determine_batch_dims(const BasecallerCreationParams &params) {
             }
             // Clear the cache each time. Without this, intermittent cuda memory allocation errors
             // are seen on windows laptop NVIDIA RTX A5500 Laptop GPU. See JIRA issue DOR-466
+#if DORADO_ROCM_BUILD
+            c10::hip::HIPCachingAllocator::emptyCache();
+#else
             c10::cuda::CUDACachingAllocator::emptyCache();
+#endif
 
             spdlog::debug("Auto batchsize {}: {}, time per chunk {:8f} ms", m_device, batch_size,
                           time);
@@ -683,7 +690,11 @@ void CudaCaller::cuda_thread_fn() {
             run_basecalling();
         } catch (c10::Error &e) {
             spdlog::warn("Caught Torch error '{}', clearing CUDA cache and retrying.", e.msg());
+#if DORADO_ROCM_BUILD
+            c10::hip::HIPCachingAllocator::emptyCache();
+#else
             c10::cuda::CUDACachingAllocator::emptyCache();
+#endif
             run_basecalling();
         }
         ++m_num_batches_called;
