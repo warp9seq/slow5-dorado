@@ -65,6 +65,8 @@ private:
 #if DORADO_ROCM_BUILD
 #include "cuda_utils.h"
 #include "utils/dev_utils.h"
+#include <ATen/hip/HIPContext.h>
+#include <hip/hip_runtime.h>
 #endif
 
 namespace dorado::utils {
