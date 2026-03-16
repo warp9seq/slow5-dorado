@@ -31,12 +31,21 @@ extern "C" {
 #include "koi.h"
 #endif
 }
+#if DORADO_ROCM_BUILD
+#include <ATen/hip/HIPContext.h>
+#else
+#include <ATen/cuda/CUDAContext.h>
+#endif
 
 
 namespace {
 bool koi_can_use_cutlass() {
+#if DORADO_ROCM_BUILD
+    return false;
+#else
     cudaDeviceProp *prop = at::cuda::getCurrentDeviceProperties();
     return ((prop->major == 8 || prop->major == 9) && prop->minor == 0);
+#endif
 }
 
 struct KoiTensorExt : public KoiTensor {
@@ -171,7 +180,11 @@ at::Tensor GatedMLPImpl::forward(const at::Tensor &x) {
                                   .view({-1, in_features});
             features_interleaved = true;
         }
+#if DORADO_ROCM_BUILD
+        auto stream = at::hip::getCurrentHIPStream().stream();
+#else
         auto stream = at::cuda::getCurrentCUDAStream().stream();
+#endif
         t = torch::empty({N, T, hidden_features}, x.options());
         int res = host_linear_swiglu_f16(stream, int(N * T), 2 * hidden_features, in_features,
                                          x.data_ptr(), fc1->weight.data_ptr(), t.data_ptr());
@@ -372,7 +385,11 @@ at::Tensor MultiHeadAttentionImpl::forward(at::Tensor x) {
         utils::ScopedProfileRange spr("ROTE", 3);
 #if DORADO_CUDA_BUILD
         if (use_koi_rote) {
+#if DORADO_ROCM_BUILD
+            auto stream = at::hip::getCurrentHIPStream().stream();
+#else
             auto stream = at::cuda::getCurrentCUDAStream().stream();
+#endif
             auto out = torch::empty({3, N, nhead, T, head_dim}, qkv.options());
             int res = host_rotary_embed_transpose_f16(
                     stream, static_cast<int>(N), static_cast<int>(T), nhead, head_dim,
@@ -394,7 +411,11 @@ at::Tensor MultiHeadAttentionImpl::forward(at::Tensor x) {
                              koi_can_use_cutlass();
     if (use_koi_attention) {
         utils::ScopedProfileRange spr("KOI_MEA", 3);
+#if DORADO_ROCM_BUILD
+        auto stream = at::hip::getCurrentHIPStream().stream();
+#else
         auto stream = at::cuda::getCurrentCUDAStream().stream();
+#endif
         const auto [win_upper, win_lower] = attn_window;
         res = host_masked_attention_f16(stream, static_cast<int>(N), static_cast<int>(T), nhead,
                                         head_dim, win_upper, win_lower, qkv[0].data_ptr(),
@@ -486,7 +507,11 @@ void TxEncoderImpl::koi_forward(utils::ScaledTensor &scaled_tensor, at::Tensor &
     const int H = params.nhead;
     const int E = params.dim_feedforward * 2;
     const auto [win_upper, win_lower] = params.attn_window;
+#if DORADO_ROCM_BUILD
+    auto stream = at::hip::getCurrentHIPStream().stream();
+#else
     auto stream = at::cuda::getCurrentCUDAStream().stream();
+#endif
 
     // Atomic counter, need 4 buffers of 4B each of working memory
     auto ctr = torch::zeros({4}, x_f16.options().dtype(torch::kI32));
@@ -750,7 +775,11 @@ void TxEncoderImpl::koi_volta_forward(at::Tensor &x_f16) {
     const int D = params.d_model / params.nhead;
     const int H = params.nhead;
     const int E = params.dim_feedforward * 2;
+#if DORADO_ROCM_BUILD
+    auto stream = at::hip::getCurrentHIPStream().stream();
+#else
     auto stream = at::cuda::getCurrentCUDAStream().stream();
+#endif
 
     // Koi tests show fastest configuration with f32_accum for proj, swiglu, fc2 and f16_accum for qkv
     bool useFloatAccumQKV = utils::get_dev_opt("volta_f32_accum_qkv", false);
@@ -892,7 +921,11 @@ at::Tensor TxEncoderImpl::forward(at::Tensor x) {
 #if DORADO_CUDA_BUILD
         int res = KOI_NOT_SUPPORTED;
         if (x.is_cuda()) {
+#if DORADO_ROCM_BUILD
+            auto stream = at::hip::getCurrentHIPStream().stream();
+#else
             auto stream = at::cuda::getCurrentCUDAStream().stream();
+#endif
             res = host_fused_residual_rmsnorm_f16(stream, C, num_rows, in.data_ptr(), x.data_ptr(),
                                                   deepnorm_alpha.data_ptr(),
                                                   norm->weight.data_ptr(), x.data_ptr());
