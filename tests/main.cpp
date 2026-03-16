@@ -4,7 +4,9 @@
 
 #include <catch2/catch_session.hpp>
 #include <catch2/catch_test_macros.hpp>
+#if !DORADO_ROCM_BUILD
 #include <nvtx3/nvtx3.hpp>
+#endif
 #include <torch/utils.h>
 
 int main(int argc, char* argv[]) {
@@ -20,9 +22,11 @@ int main(int argc, char* argv[]) {
     // and some of the tests launch multiple threads each
     // of which trigger an NVTX init which causes the thread
     // sanitizers to fail.
+#if !DORADO_ROCM_BUILD
     {
         nvtx3::scoped_range loop{__func__};
     }
+#endif
 
     int result = Catch::Session().run(argc, argv);
 

@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-#ifndef __APPLE__
+#if !defined(__APPLE__) && !DORADO_ROCM_BUILD
 #include <cuda.h>
 #endif
 
@@ -103,7 +103,7 @@ int main(int argc, char* argv[]) {
     if (subcommand == "-v" || subcommand == "--version") {
         std::cerr << DORADO_VERSION << '\n';
     } else if (subcommand == "-vv") {
-#ifdef __APPLE__
+#if defined(__APPLE__) || DORADO_ROCM_BUILD
         std::cerr << "dorado:   " << DORADO_VERSION << '\n';
 #else
         std::cerr << "dorado:   " << DORADO_VERSION << "+cu" << CUDA_VERSION << '\n';
