@@ -7,7 +7,9 @@
 #include "utils/sequence_utils.h"
 #include "utils/thread_utils.h"
 
+#if !DORADO_ROCM_BUILD
 #include <nvtx3/nvtx3.hpp>
+#endif
 #include <spdlog/spdlog.h>
 
 #include <chrono>
@@ -17,8 +19,13 @@
 #include <vector>
 
 #if DORADO_CUDA_BUILD
+#if DORADO_ROCM_BUILD
+#include <c10/hip/HIPGuard.h>
+#include <c10/hip/HIPStream.h>
+#else
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
+#endif
 #include <torch/cuda.h>
 #endif
 
@@ -55,13 +62,22 @@ ModBaseCaller::ModBaseData::ModBaseData(const config::ModBaseModelConfig& config
 
 #if DORADO_CUDA_BUILD
     if (opts.device().is_cuda()) {
+#if DORADO_ROCM_BUILD
+        c10::hip::HIPGuard device_guard(opts.device());
+        stream = c10::hip::getStreamFromPool(false, opts.device().index());
+#else
         c10::cuda::CUDAGuard device_guard(opts.device());
         stream = c10::cuda::getStreamFromPool(false, opts.device().index());
+#endif
 
         const int channels = utils::BaseInfo::NUM_BASES * params.general.kmer_len;
 
         // Warmup
+#if DORADO_ROCM_BUILD
+        c10::hip::HIPStreamGuard guard(*stream);
+#else
         c10::cuda::CUDAStreamGuard guard(*stream);
+#endif
         auto input_sigs = torch::empty({batch_size, 1, get_sig_len()}, opts);
         auto input_seqs = torch::empty({batch_size, get_seq_len(), channels}, opts);
         module_holder.forward(input_sigs, input_seqs);
@@ -175,7 +191,9 @@ at::Tensor ModBaseCaller::call_chunks(size_t model_id,
                                       at::Tensor& input_sigs,
                                       at::Tensor& input_seqs,
                                       int num_chunks) {
+#if !DORADO_ROCM_BUILD
     NVTX3_FUNC_RANGE();
+#endif
     auto& model_data = m_model_data.at(model_id);
     auto task = std::make_shared<ModBaseTask>(input_sigs.to(m_options.device()),
                                               input_seqs.to(m_options.device()), num_chunks);
@@ -230,10 +248,16 @@ void ModBaseCaller::modbase_task_thread_fn(size_t model_id) {
     auto& model_data = m_model_data[model_id];
 #if DORADO_CUDA_BUILD
     static std::vector<std::mutex> gpu_mutexes(torch::cuda::device_count());
+#if DORADO_ROCM_BUILD
+    c10::hip::OptionalHIPStreamGuard stream_guard(model_data->stream);
+#else
     c10::cuda::OptionalCUDAStreamGuard stream_guard(model_data->stream);
 #endif
+#endif
     while (true) {
+#if !DORADO_ROCM_BUILD
         nvtx3::scoped_range loop{"modbase_task_thread_fn"};
+#endif
         at::InferenceMode guard;
 
         std::unique_lock<std::mutex> input_lock(model_data->input_lock);
