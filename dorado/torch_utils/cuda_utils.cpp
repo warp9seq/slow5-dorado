@@ -376,7 +376,6 @@ std::unique_lock<std::mutex> acquire_gpu_lock(int gpu_index, bool use_lock) {
 // This might come in handy for tracking down where big Torch allocations happen
 void print_cuda_alloc_info(const std::string &label) {
 #if DORADO_ROCM_BUILD
-    // c10::cuda::CUDACachingAllocator stats not available in ROCm PyTorch builds.
     spdlog::debug("print_cuda_alloc_info ({}): not supported on ROCm build", label);
 #else
     auto stats = c10::cuda::CUDACachingAllocator::getDeviceStats(0);

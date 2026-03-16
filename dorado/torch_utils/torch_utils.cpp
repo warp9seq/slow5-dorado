@@ -35,10 +35,8 @@ void initialise_torch() {
 void make_torch_deterministic() {
 #if DORADO_CUDA_BUILD
 #if !DORADO_ROCM_BUILD
-    // cuBLAS workspace config is NVIDIA-specific; ROCm uses rocBLAS which does not need this.
     setenv("CUBLAS_WORKSPACE_CONFIG", ":4096:8", true);
 #endif  // !DORADO_ROCM_BUILD
-    // PyTorch ROCm maps these to MIOpen equivalents.
     torch::globalContext().setDeterministicCuDNN(true);
     torch::globalContext().setBenchmarkCuDNN(false);
 #endif
