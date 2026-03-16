@@ -10,7 +10,12 @@
 #include <stdexcept>
 
 #if DORADO_CUDA_BUILD
+#if DORADO_ROCM_BUILD
+#include <c10/hip/HIPGuard.h>
+#include <c10/hip/HIPStream.h>
+#else
 #include <c10/cuda/CUDAGuard.h>
+#endif
 #endif
 
 #include <torch/torch.h>
@@ -22,7 +27,11 @@ std::vector<c10::optional<c10::Stream>> get_streams_from_caller(
     std::vector<c10::optional<c10::Stream>> streams;
     for (size_t i = 0; i < caller->num_models(); ++i) {
         if (caller->device().is_cuda()) {
+#if DORADO_ROCM_BUILD
+            streams.push_back(c10::hip::getStreamFromPool(false, caller->device().index()));
+#else
             streams.push_back(c10::cuda::getStreamFromPool(false, caller->device().index()));
+#endif
         } else {
             streams.emplace_back();
         }
@@ -89,7 +98,11 @@ void ModBaseRunner::accept_chunk(int model_id,
 
 at::Tensor ModBaseRunner::call_chunks(int model_id, int num_chunks) {
 #if DORADO_CUDA_BUILD
+#if DORADO_ROCM_BUILD
+    c10::hip::OptionalHIPStreamGuard guard(m_streams[model_id]);
+#else
     c10::cuda::OptionalCUDAStreamGuard guard(m_streams[model_id]);
+#endif
 #endif
     return m_caller->call_chunks(model_id, m_input_sigs[model_id], m_input_seqs[model_id],
                                  num_chunks);
