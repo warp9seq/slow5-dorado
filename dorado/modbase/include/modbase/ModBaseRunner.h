@@ -4,7 +4,11 @@
 
 #include <ATen/core/TensorBody.h>
 #if DORADO_CUDA_BUILD
+#if DORADO_ROCM_BUILD
+#include <c10/hip/HIPStream.h>
+#else
 #include <c10/cuda/CUDAStream.h>
+#endif
 #endif
 #include <atomic>
 #include <string>
