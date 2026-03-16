@@ -7,10 +7,12 @@
 #include <optional>
 
 #if DORADO_CUDA_BUILD
-
-#include <ATen/cuda/CUDAContext.h>
+#if DORADO_ROCM_BUILD
+#include <c10/hip/HIPGuard.h>
+#else
 #include <c10/cuda/CUDAGuard.h>
-
+#include <ATen/cuda/CUDAContext.h>
+#endif
 #endif
 
 #include <torch/nn.h>
@@ -57,7 +59,11 @@ void CRFModelImpl::load_state_dict(const std::vector<at::Tensor> &weights) {
 #if DORADO_CUDA_BUILD
 at::Tensor CRFModelImpl::run_koi(const at::Tensor &in) {
     // Input is [N, C, T] -- TODO: change to [N, T, C] on the input buffer side?
+#if DORADO_ROCM_BUILD
+    c10::hip::HIPGuard device_guard(in.device());
+#else
     c10::cuda::CUDAGuard device_guard(in.device());
+#endif
 
     // Determine working memory size
     WorkingMemory wm(int(in.size(0)));
