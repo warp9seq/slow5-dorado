@@ -55,11 +55,15 @@ else()
             CudaModelRunner.cpp
             decode/CUDADecoder.cpp
     )
-    if(NOT DORADO_ROCM_BUILD)
+    if(NOT DORADO_ROCM_BUILD) #todo hm: this for ROCM?
         target_link_libraries(dorado_basecall PRIVATE dorado_benchmarks)
     endif()
 endif()
 
 if (TARGET koi)
     target_link_libraries(dorado_basecall PRIVATE koi)
+endif()
+
+if (TARGET openfish)
+    target_link_libraries(dorado_basecall PRIVATE openfish)
 endif()

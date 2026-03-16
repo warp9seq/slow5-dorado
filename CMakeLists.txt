@@ -182,6 +182,7 @@ option(DORADO_ROCM_BUILD "Build with ROCm/HIP support for AMD GPUs" OFF)
 # Bring in 3rdparty libs
 include(cmake/Zlib.cmake)
 include(cmake/Koi.cmake)
+include(cmake/Openfish.cmake)
 include(cmake/Pod5.cmake)
 include(cmake/Torch.cmake)
 include(cmake/OpenSSL.cmake)
