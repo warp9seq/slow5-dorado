@@ -34,7 +34,11 @@ void initialise_torch() {
 
 void make_torch_deterministic() {
 #if DORADO_CUDA_BUILD
+#if !DORADO_ROCM_BUILD
+    // cuBLAS workspace config is NVIDIA-specific; ROCm uses rocBLAS which does not need this.
     setenv("CUBLAS_WORKSPACE_CONFIG", ":4096:8", true);
+#endif  // !DORADO_ROCM_BUILD
+    // PyTorch ROCm maps these to MIOpen equivalents.
     torch::globalContext().setDeterministicCuDNN(true);
     torch::globalContext().setBenchmarkCuDNN(false);
 #endif
@@ -61,17 +65,25 @@ void set_torch_allocator_max_split_size() {
 #endif
     std::string settings = "max_split_size_mb:" + std::to_string(max_split_size_mb);
 
-    const char* pytorch_cuda_alloc_conf = std::getenv("PYTORCH_CUDA_ALLOC_CONF");
-    if (pytorch_cuda_alloc_conf != nullptr) {
-        std::string_view str(pytorch_cuda_alloc_conf);
+#if DORADO_ROCM_BUILD
+    const char* pytorch_alloc_conf = std::getenv("PYTORCH_HIP_ALLOC_CONF");
+#else
+    const char* pytorch_alloc_conf = std::getenv("PYTORCH_CUDA_ALLOC_CONF");
+#endif
+    if (pytorch_alloc_conf != nullptr) {
+        std::string_view str(pytorch_alloc_conf);
         if (str.find("max_split_size_mb") != std::string_view::npos) {
             // user has set this via env_var - let torch parse and use their value
             return;
         }
-        settings += std::string(",") + pytorch_cuda_alloc_conf;
+        settings += std::string(",") + pytorch_alloc_conf;
     }
 
+#if DORADO_ROCM_BUILD
+    c10::hip::HIPCachingAllocator::setAllocatorSettings(settings);
+#else
     c10::cuda::CUDACachingAllocator::setAllocatorSettings(settings);
+#endif
 #endif
 }
 
