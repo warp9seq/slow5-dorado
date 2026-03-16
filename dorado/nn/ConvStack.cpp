@@ -175,7 +175,11 @@ void ConvStackImpl::ConvLayer::reserve_working_memory(WorkingMemory &wm) {
 }
 
 void ConvStackImpl::ConvLayer::run_koi(WorkingMemory &wm) {
+#if DORADO_ROCM_BUILD
+    auto stream = at::hip::getCurrentHIPStream().stream();
+#else
     auto stream = at::cuda::getCurrentCUDAStream().stream();
+#endif
     utils::ScopedProfileRange spr("conv", 2);
 
     auto in = wm.current;

@@ -88,7 +88,11 @@ void LSTMStackImpl::forward_cublas(WorkingMemory &wm) {
     auto inout_left = in.narrow(0, 0, wm.T).select(2, 0);
     auto inout_right = in.narrow(0, 1, wm.T).select(2, 1);
 
+#if DORADO_ROCM_BUILD
+    auto stream = at::hip::getCurrentHIPStream().stream();
+#else
     auto stream = at::cuda::getCurrentCUDAStream().stream();
+#endif
     auto gate_buf = wm.temp({wm.N, layer_size * 4}, torch::kF16);
 
     for (size_t layer_idx = 0; layer_idx < rnns.size(); ++layer_idx) {
@@ -129,7 +133,11 @@ void LSTMStackImpl::forward_cutlass(WorkingMemory &wm) {
     wm.current[0] = 0;
     wm.current[-1] = 0;
 
+#if DORADO_ROCM_BUILD
+    auto stream = at::hip::getCurrentHIPStream().stream();
+#else
     auto stream = at::cuda::getCurrentCUDAStream().stream();
+#endif
     auto opts_f16 = wm.current.options().dtype(torch::kF16);
     auto opts_i32 = opts_f16.dtype(torch::kI32);
 
@@ -212,7 +220,11 @@ void LSTMStackImpl::forward_quantized(WorkingMemory &wm) {
         }
     }
 
+#if DORADO_ROCM_BUILD
+    auto stream = at::hip::getCurrentHIPStream().stream();
+#else
     auto stream = at::cuda::getCurrentCUDAStream().stream();
+#endif
     auto mm_out = wm.temp({wm.N * wm.T, 4 * layer_size}, torch::kF16);
     for (size_t i = 0; i < rnns.size(); ++i) {
         int dir = (i & 1) ? 1 : -1;

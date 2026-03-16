@@ -46,7 +46,11 @@ void LinearCRFImpl::reserve_working_memory(WorkingMemory &wm) {
     wm.next_TC(wm.T, int(linear->weight.size(0)), TensorLayout::NTC);
 }
 void LinearCRFImpl::run_koi(WorkingMemory &wm) {
+#if DORADO_ROCM_BUILD
+    auto stream = at::hip::getCurrentHIPStream().stream();
+#else
     auto stream = at::cuda::getCurrentCUDAStream().stream();
+#endif
 
     auto type_id = (wm.layout == TensorLayout::CUTLASS_TNC_I8) ? KOI_I8 : KOI_F16;
     int C_in = wm.C;

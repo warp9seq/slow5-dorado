@@ -31,7 +31,7 @@ extern "C" {
 #include "koi.h"
 #endif
 }
-#endif
+
 
 namespace {
 bool koi_can_use_cutlass() {
