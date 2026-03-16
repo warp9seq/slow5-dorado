@@ -6,7 +6,11 @@
 
 #if DORADO_CUDA_BUILD
 extern "C" {
+#if DORADO_ROCM_BUILD
+#include "fakekoi.h"
+#else
 #include "koi.h"
+#endif
 }
 #endif
 
