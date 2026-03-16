@@ -1,5 +1,10 @@
 OPTION(BUILD_KOI_FROM_SOURCE OFF)
 
+# Koi is an NVIDIA-only library; skip it entirely for ROCm builds.
+if(DORADO_ROCM_BUILD)
+    return()
+endif()
+
 function(get_best_compatible_koi_version KOI_CUDA)
     if (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "aarch64")
         # Koi provides binaries for these cuda versions when targeting aarch64
