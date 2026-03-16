@@ -94,6 +94,7 @@ target_compile_definitions(dorado_utils
         ENABLE_PER_READ_TRACE=$<BOOL:${DORADO_PER_READ_TRACE}>
         DORADO_CUDA_BUILD=$<NOT:$<BOOL:${APPLE}>>
         DORADO_METAL_BUILD=$<BOOL:${APPLE}>
+        DORADO_ROCM_BUILD=$<BOOL:${DORADO_ROCM_BUILD}>
 )
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^aarch64*|^arm*")
     target_compile_definitions(dorado_utils PUBLIC DORADO_ORIN=1)
