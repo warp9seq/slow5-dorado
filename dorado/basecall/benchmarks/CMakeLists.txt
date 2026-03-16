@@ -1,5 +1,5 @@
 if(DORADO_ROCM_BUILD)
-    add_library(dorado_benchmarks STATIC)
+
 else()
     add_library(dorado_benchmarks STATIC
         CudaChunkBenchmarks.cpp
@@ -28,6 +28,7 @@ else()
     endif()
 
     target_sources(dorado_benchmarks PRIVATE ${HOPPER_BENCHMARKS})
+    enable_warnings_as_errors(dorado_benchmarks)
+
 endif()
 
-enable_warnings_as_errors(dorado_benchmarks)
