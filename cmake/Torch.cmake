@@ -120,7 +120,7 @@ else()
             endif()
         else()
             if(DORADO_ROCM_BUILD)
-                # todo: check for abi, rocm versions and sha hashes etc
+                # todo hm: check for abi, rocm versions and sha hashes etc
                 set(ROCM_TORCH_VERSION 2.9.0)
                 set(TORCH_URL "https://download.pytorch.org/libtorch/rocm6.4/libtorch-shared-with-deps-2.9.0%2Brocm6.4.zip")
                 set(TORCH_HASH "cca94e1b5a020e7e5a9ab39b19a5d3433698f551f58915f852d51119bb7b8f6b")
@@ -224,7 +224,7 @@ else()
     message(STATUS "TORCH_BUILD_VERSION: ${TORCH_BUILD_VERSION}")
 endif()
 
-#todo fix this for ROCM
+#todo hm: fix this for ROCM
 if (NOT TORCH_BUILD_VERSION VERSION_EQUAL TORCH_VERSION)
   message(WARNING "expected ${TORCH_VERSION} but found ${TORCH_BUILD_VERSION}")
 endif()

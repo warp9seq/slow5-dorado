@@ -2,7 +2,8 @@
 
 #include "utils/sys_utils.h"
 
-#if defined(_WIN32) || defined(__linux__)
+//todo hm:add ROCM version for nvml
+#if (defined(_WIN32) || defined(__linux__)) && !DORADO_ROCM_BUILD
 #define HAS_NVML 1
 #else
 #define HAS_NVML 0

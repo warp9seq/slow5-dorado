@@ -21,7 +21,7 @@ function(enable_warnings_as_errors TARGET_NAME)
         target_compile_options(${TARGET_NAME} PRIVATE
             -Wall -Wextra -Wundef -Wshadow
             -Wmissing-declarations -Wno-error=maybe-uninitialized
-            #todo -Werror is failing for rocm torch
+            #todo hm: -Werror is failing for rocm torch
         )
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         target_compile_options(${TARGET_NAME} PRIVATE
