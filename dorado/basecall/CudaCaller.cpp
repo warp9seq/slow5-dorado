@@ -9,11 +9,11 @@
 #include "utils/sys_utils.h"
 #include "utils/thread_utils.h"
 
-#include <ATen/cuda/CUDAContext.h>
 #if DORADO_ROCM_BUILD
 #include <c10/hip/HIPGuard.h>
 #include <c10/hip/HIPStream.h>
 #else
+#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <nvtx3/nvtx3.hpp>
 #endif
