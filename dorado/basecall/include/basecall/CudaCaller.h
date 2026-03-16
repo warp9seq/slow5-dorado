@@ -6,7 +6,11 @@
 #include "config/BasecallModelConfig.h"
 #include "utils/stats.h"
 
+#if DORADO_ROCM_BUILD
+#include <c10/hip/HIPStream.h>
+#else
 #include <c10/cuda/CUDAStream.h>
+#endif
 #include <torch/nn.h>
 
 #include <atomic>
@@ -72,7 +76,11 @@ private:
     int m_num_input_features;
     const bool m_low_latency;
     const PipelineType m_pipeline_type;
+#if DORADO_ROCM_BUILD
+    c10::hip::HIPStream m_stream;
+#else
     c10::cuda::CUDAStream m_stream;
+#endif
 
     // A CudaCaller may accept chunks of multiple different sizes. Smaller sizes will be used to
     // speed up processing of reads that are shorter than the longest chunk size.

@@ -3,7 +3,11 @@
 #include "ModelRunnerBase.h"
 
 #include <ATen/core/TensorBody.h>
+#if DORADO_ROCM_BUILD
+#include <c10/hip/HIPStream.h>
+#else
 #include <c10/cuda/CUDAStream.h>
+#endif
 
 #include <atomic>
 #include <filesystem>
@@ -33,7 +37,11 @@ private:
     std::shared_ptr<CudaCaller> m_caller;
     at::Tensor m_input;
     at::Tensor m_output;
+#if DORADO_ROCM_BUILD
+    c10::hip::HIPStream m_stream;
+#else
     c10::cuda::CUDAStream m_stream;
+#endif
 
     // Performance monitoring stats.
     std::atomic<int64_t> m_num_batches_called = 0;

@@ -10,8 +10,13 @@
 #include "utils/thread_utils.h"
 
 #include <ATen/cuda/CUDAContext.h>
+#if DORADO_ROCM_BUILD
+#include <c10/hip/HIPGuard.h>
+#include <c10/hip/HIPStream.h>
+#else
 #include <c10/cuda/CUDAGuard.h>
 #include <nvtx3/nvtx3.hpp>
+#endif
 #include <spdlog/spdlog.h>
 #include <torch/cuda.h>
 
@@ -89,10 +94,17 @@ void emit_benchmark_file(const std::string &gpu_name,
     }
 }
 
+#if DORADO_ROCM_BUILD
+c10::hip::HIPStream get_stream_for_device(c10::Device device) {
+    c10::hip::HIPGuard device_guard(device);
+    return c10::hip::getStreamFromPool(false, device.index());
+}
+#else
 c10::cuda::CUDAStream get_stream_for_device(c10::Device device) {
     c10::cuda::CUDAGuard device_guard(device);
     return c10::cuda::getStreamFromPool(false, device.index());
 }
+#endif
 
 }  // namespace
 
@@ -140,13 +152,21 @@ CudaCaller::CudaCaller(const BasecallerCreationParams &params)
 
     determine_batch_dims(params);
 
+#if DORADO_ROCM_BUILD
+    c10::hip::HIPGuard device_guard(m_options.device());
+#else
     c10::cuda::CUDAGuard device_guard(m_options.device());
+#endif
     c10::cuda::CUDACachingAllocator::emptyCache();
 
     auto [crfmodel_bytes_per_ct, decode_bytes_per_ct] = calculate_memory_requirements();
 
     // Warmup
+#if DORADO_ROCM_BUILD
+    c10::hip::HIPStreamGuard stream_guard(m_stream);
+#else
     c10::cuda::CUDAStreamGuard stream_guard(m_stream);
+#endif
     for (const auto &batch_dim : m_batch_dims) {
         spdlog::info("{} using chunk size {}, batch size {}", m_device, batch_dim.T_in,
                      batch_dim.N);
@@ -188,7 +208,9 @@ std::pair<int, int> CudaCaller::batch_timeouts_ms() const {
 std::vector<decode::DecodedChunk> CudaCaller::call_chunks(at::Tensor &input,
                                                           at::Tensor &output,
                                                           int num_chunks) {
+#if !DORADO_ROCM_BUILD
     NVTX3_FUNC_RANGE();
+#endif
     if (num_chunks == 0) {
         return std::vector<decode::DecodedChunk>();
     }
@@ -555,18 +577,28 @@ void CudaCaller::cuda_thread_fn() {
             "input_queue_cv_device_" + std::to_string(m_options.device().index());
     const std::string gpu_lock_scope_str = "gpu_lock_" + std::to_string(m_options.device().index());
 
+#if DORADO_ROCM_BUILD
+    c10::hip::HIPStreamGuard stream_guard(m_stream);
+#else
     c10::cuda::CUDAStreamGuard stream_guard(m_stream);
+#endif
     auto &task_queue = get_task_queue();
     while (true) {
+#if !DORADO_ROCM_BUILD
         nvtx3::scoped_range loop{loop_scope_str};
+#endif
         std::unique_lock<std::mutex> input_lock(task_queue.m_input_lock);
+#if !DORADO_ROCM_BUILD
         nvtxRangePushA(input_q_cv_scope_str.c_str());
+#endif
         task_queue.m_input_cv.wait(input_lock, [&] {
             return (!task_queue.m_input_queue.empty() &&
                     task_queue.m_input_queue.front()->caller == this) ||
                    (task_queue.m_input_queue.empty() && m_terminate.load());
         });
+#if !DORADO_ROCM_BUILD
         nvtxRangePop();
+#endif
 
         if (task_queue.m_input_queue.empty() && m_terminate.load()) {
             return;

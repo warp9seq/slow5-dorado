@@ -4,7 +4,12 @@
 #include "torch_utils/cuda_utils.h"
 #include "utils/math_utils.h"
 
+#if DORADO_ROCM_BUILD
+#include <c10/hip/HIPGuard.h>
+#include <c10/hip/HIPStream.h>
+#else
 #include <c10/cuda/CUDAGuard.h>
+#endif
 
 #include <sstream>
 
@@ -12,7 +17,11 @@ namespace dorado::basecall {
 
 CudaModelRunner::CudaModelRunner(std::shared_ptr<CudaCaller> caller, size_t batch_dims_idx)
         : m_caller(std::move(caller)),
+#if DORADO_ROCM_BUILD
+          m_stream(c10::hip::getStreamFromPool(false, m_caller->device().index())) {
+#else
           m_stream(c10::cuda::getStreamFromPool(false, m_caller->device().index())) {
+#endif
     std::tie(m_input, m_output) = m_caller->create_input_output_tensor(batch_dims_idx);
 }
 
@@ -23,7 +32,11 @@ void CudaModelRunner::accept_chunk(int chunk_idx, const at::Tensor &chunk) {
 std::vector<decode::DecodedChunk> CudaModelRunner::call_chunks(int num_chunks) {
     ++m_num_batches_called;
     stats::Timer timer;
+#if DORADO_ROCM_BUILD
+    c10::hip::HIPStreamGuard guard(m_stream);
+#else
     c10::cuda::CUDAStreamGuard guard(m_stream);
+#endif
     auto decoded_chunks = m_caller->call_chunks(m_input, m_output, num_chunks);
     return decoded_chunks;
 }
