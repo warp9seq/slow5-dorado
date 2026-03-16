@@ -123,6 +123,8 @@ else()
                 # todo: check for abi, rocm versions and sha hashes etc
                 set(ROCM_TORCH_VERSION 2.9.0)
                 set(TORCH_URL "https://download.pytorch.org/libtorch/rocm6.4/libtorch-shared-with-deps-2.9.0%2Brocm6.4.zip")
+                set(TORCH_HASH "cca94e1b5a020e7e5a9ab39b19a5d3433698f551f58915f852d51119bb7b8f6b")
+                set(TORCH_PATCH_SUFFIX -cxx11-abi)
             elseif (TRY_USING_STATIC_TORCH_LIB)
                 if(DORADO_USING_OLD_CPP_ABI)
                     if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 12.8)
@@ -222,6 +224,7 @@ else()
     message(STATUS "TORCH_BUILD_VERSION: ${TORCH_BUILD_VERSION}")
 endif()
 
+#todo fix this for ROCM
 if (NOT TORCH_BUILD_VERSION VERSION_EQUAL TORCH_VERSION)
   message(WARNING "expected ${TORCH_VERSION} but found ${TORCH_BUILD_VERSION}")
 endif()
