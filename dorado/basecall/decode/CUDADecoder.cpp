@@ -11,12 +11,34 @@
 #include <nvtx3/nvtx3.hpp>
 #endif
 
-//todo hm: KOI
-#if !DORADO_ROCM_BUILD
 extern "C" {
+
+#ifdef DORADO_ROCM_BUILD
+#include <hip/hip_runtime.h>
+hipError_t host_back_guide_step(hipStream_t stream, void *chunks, void *chunk_results, long N,
+                                void *scores, float score_clamp_val, long C, void *aux,
+                                void *path, void *moves, void *dummy, void *sequence,
+                                void *qstring, float q_scale, float q_shift, int beam_width,
+                                float beam_cut, float blank_score);
+hipError_t host_beam_search_step(hipStream_t stream, void *chunks, void *chunk_results, long N,
+                                 void *scores, float score_clamp_val, long C, void *aux,
+                                 void *path, void *moves, void *dummy, void *sequence,
+                                 void *qstring, float q_scale, float q_shift, int beam_width,
+                                 float beam_cut, float blank_score);
+hipError_t host_compute_posts_step(hipStream_t stream, void *chunks, void *chunk_results, long N,
+                                   void *scores, float score_clamp_val, long C, void *aux,
+                                   void *path, void *moves, void *dummy, void *sequence,
+                                   void *qstring, float q_scale, float q_shift, int beam_width,
+                                   float beam_cut, float blank_score);
+hipError_t host_run_decode(hipStream_t stream, void *chunks, void *chunk_results, long N,
+                           void *scores, float score_clamp_val, long C, void *aux, void *path,
+                           void *moves, void *dummy, void *sequence, void *qstring, float q_scale,
+                           float q_shift, int beam_width, float beam_cut, float blank_score,
+                           bool move_pad);
+#else
 #include "koi.h"
-}
 #endif
+}
 
 namespace dorado::basecall::decode {
 
