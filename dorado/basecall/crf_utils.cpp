@@ -7,7 +7,11 @@
 #include "utils/memory_utils.h"
 
 #if DORADO_CUDA_BUILD
+#if DORADO_ROCM_BUILD
+#include <c10/hip/HIPGuard.h>
+#else
 #include <c10/cuda/CUDAGuard.h>
+#endif
 #endif
 
 #include <algorithm>
@@ -189,7 +193,11 @@ ModuleHolder<AnyModule> load_crf_model(const BasecallModelConfig &model_config,
     if (options.device().is_cuda()) {
         device = options.device();
     }
+#if DORADO_ROCM_BUILD
+    c10::hip::OptionalHIPGuard device_guard(device);
+#else
     c10::cuda::OptionalCUDAGuard device_guard(device);
+#endif
 #endif
     if (model_config.is_tx_model()) {
         return load_tx_model(model_config, options);
