@@ -4,11 +4,9 @@
 // or use `dorado [basecaller|duplex] ... --devopts cuda_profile_level=<X> ...`
 #define CUDA_PROFILE_LEVEL_DEFAULT 0
 
-#if DORADO_CUDA_BUILD
+#if DORADO_CUDA_BUILD && !DORADO_ROCM_BUILD
 #include "cuda_utils.h"
 #include "utils/dev_utils.h"
-
-#if !DORADO_ROCM_BUILD
 
 #include <ATen/cuda/CUDAContext.h>
 #include <cuda_runtime.h>
@@ -63,6 +61,12 @@ private:
 }  // namespace dorado::utils
 
 #else
+
+#if DORADO_ROCM_BUILD
+#include "cuda_utils.h"
+#include "utils/dev_utils.h"
+#endif
+
 namespace dorado::utils {
 // Do nothing on Apple and ROCM platforms
 struct ScopedProfileRange {
