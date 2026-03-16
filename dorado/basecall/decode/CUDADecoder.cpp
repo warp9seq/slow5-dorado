@@ -3,8 +3,13 @@
 #include "torch_utils/cuda_utils.h"
 #include "torch_utils/gpu_profiling.h"
 
+#if DORADO_ROCM_BUILD
+#include <ATen/hip/HIPContext.h>
+#include <c10/hip/HIPGuard.h>
+#else
 #include <c10/cuda/CUDAGuard.h>
 #include <nvtx3/nvtx3.hpp>
+#endif
 
 extern "C" {
 #include "koi.h"
@@ -16,7 +21,11 @@ DecodeData CUDADecoder::beam_search_part_1(DecodeData data) const {
     auto scores = data.data;
     auto &options = data.options;
 
+#if DORADO_ROCM_BUILD
+    c10::hip::HIPGuard device_guard(scores.device());
+#else
     c10::cuda::CUDAGuard device_guard(scores.device());
+#endif
     utils::ScopedProfileRange loop{"gpu_decode", 1};
     long int N = (long int)(scores.sizes()[0]);
     long int T = (long int)(scores.sizes()[1]);
@@ -48,7 +57,11 @@ DecodeData CUDADecoder::beam_search_part_1(DecodeData data) const {
     auto sequence = moves_sequence_qstring[1];
     auto qstring = moves_sequence_qstring[2];
 
+#if DORADO_ROCM_BUILD //todo hm: is this cores.device().index() needed?
+    auto stream = at::hip::getCurrentHIPStream(scores.device().index()).stream();
+#else
     auto stream = at::cuda::getCurrentCUDAStream().stream();
+#endif
     {
         utils::ScopedProfileRange spr{"back_guides", 2};
         dorado::utils::handle_cuda_result(host_back_guide_step(
@@ -88,7 +101,9 @@ DecodeData CUDADecoder::beam_search_part_1(DecodeData data) const {
 
 std::vector<DecodedChunk> CUDADecoder::beam_search_part_2(DecodeData data) const {
     auto moves_sequence_qstring_cpu = data.data;
+#if !DORADO_ROCM_BUILD
     nvtx3::scoped_range loop{"cpu_decode"};
+#endif
     assert(moves_sequence_qstring_cpu.device() == at::kCPU);
     auto moves_cpu = moves_sequence_qstring_cpu[0];
     auto sequence_cpu = moves_sequence_qstring_cpu[1];
