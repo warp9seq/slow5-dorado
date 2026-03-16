@@ -2,6 +2,9 @@
 include_guard(GLOBAL)
 
 set(TORCH_VERSION 2.6.0)
+# ROCm version paired with this PyTorch release (used when DORADO_ROCM_BUILD=ON)
+set(ROCM_VERSION 6.2)
+option(DORADO_ROCM_BUILD "Build with AMD ROCm/HIP GPU backend instead of NVIDIA CUDA" OFF)
 unset(TORCH_PATCH_SUFFIX)
 
 if (NOT DEFINED TRY_USING_STATIC_TORCH_LIB)
@@ -15,7 +18,18 @@ if (NOT DEFINED TRY_USING_STATIC_TORCH_LIB)
 endif()
 set(USING_STATIC_TORCH_LIB FALSE)
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR WIN32)
+if(DORADO_ROCM_BUILD)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR "ROCm builds are only supported on Linux")
+    endif()
+    # Locate the ROCm installation (default /opt/rocm; override with -DROCM_PATH=...)
+    if(NOT DEFINED ROCM_PATH)
+        set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to the ROCm installation root")
+    endif()
+    list(APPEND CMAKE_PREFIX_PATH "${ROCM_PATH}")
+    find_package(hip REQUIRED HINTS "${ROCM_PATH}")
+    message(STATUS "Found HIP ${hip_VERSION} at ${ROCM_PATH}")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR WIN32)
     find_package(CUDAToolkit REQUIRED)
     # the torch cuda.cmake will set(CUDAToolkit_ROOT "${CUDA_TOOLKIT_ROOT_DIR}") [2]
     # so we need to make CUDA_TOOLKIT_ROOT_DIR is set correctly as per [1]
@@ -108,7 +122,23 @@ else()
                 endif()
             endif()
         else()
-            if (TRY_USING_STATIC_TORCH_LIB)
+            if(DORADO_ROCM_BUILD)
+                # ROCm libtorch is dynamic-only (no static builds from PyTorch for ROCm)
+                set(ROCM_TAG "rocm${ROCM_VERSION}")
+                if(DORADO_USING_OLD_CPP_ABI)
+                    set(TORCH_URL "https://download.pytorch.org/libtorch/${ROCM_TAG}/libtorch-shared-with-deps-${TORCH_VERSION}%2B${ROCM_TAG}.zip")
+                    set(TORCH_PATCH_SUFFIX "-${ROCM_TAG}-pre-cxx11")
+                    # TODO: Replace with the actual SHA256 of the archive:
+                    #   curl -L "<url>" -o /tmp/t.zip && sha256sum /tmp/t.zip
+                    set(TORCH_HASH "REPLACE_WITH_SHA256_OF_LIBTORCH_ROCM_PRE_CXX11_ARCHIVE")
+                else()
+                    set(TORCH_URL "https://download.pytorch.org/libtorch/${ROCM_TAG}/libtorch-cxx11-abi-shared-with-deps-${TORCH_VERSION}%2B${ROCM_TAG}.zip")
+                    set(TORCH_PATCH_SUFFIX "-${ROCM_TAG}-cxx11-abi")
+                    # TODO: Replace with the actual SHA256 of the archive:
+                    #   curl -L "<url>" -o /tmp/t.zip && sha256sum /tmp/t.zip
+                    set(TORCH_HASH "REPLACE_WITH_SHA256_OF_LIBTORCH_ROCM_CXX11_ABI_ARCHIVE")
+                endif()
+            elseif (TRY_USING_STATIC_TORCH_LIB)
                 if(DORADO_USING_OLD_CPP_ABI)
                     if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 12.8)
                         set(TORCH_URL ${DORADO_CDN_URL}/torch-${TORCH_VERSION}.2-ont-CUDA-12.8-linux-x64-pre-cxx11.zip)
@@ -191,7 +221,12 @@ else()
     if(EXISTS "${TORCH_LIB}/build-version")
         file(STRINGS "${TORCH_LIB}/build-version" TORCH_BUILD_VERSION)
     else()
-        set(PYTORCH_BUILD_VERSION "import torch; print('%s+cu%s' % (torch.__version__, torch.version.cuda.replace('.', '')), end='')")
+        if(DORADO_ROCM_BUILD)
+            # torch.version.hip holds the ROCm version string in ROCm-flavoured builds
+            set(PYTORCH_BUILD_VERSION "import torch; ver = torch.version.hip if hasattr(torch.version, 'hip') and torch.version.hip else 'rocm'; print('%s+%s' % (torch.__version__, ver), end='')")
+        else()
+            set(PYTORCH_BUILD_VERSION "import torch; print('%s+cu%s' % (torch.__version__, torch.version.cuda.replace('.', '')), end='')")
+        endif()
         execute_process(
             COMMAND python3 -c "${PYTORCH_BUILD_VERSION}"
             OUTPUT_VARIABLE TORCH_BUILD_VERSION
@@ -440,7 +475,7 @@ if (USING_STATIC_TORCH_LIB)
             )
         endif()
     endif()
-elseif (TORCH_VERSION VERSION_EQUAL 2.6 AND LINUX AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+elseif (NOT DORADO_ROCM_BUILD AND TORCH_VERSION VERSION_EQUAL 2.6 AND LINUX AND CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
     # For some reason cublas is missing in non-static Linux builds (ie sanitized), so do that here.
     list(APPEND TORCH_LIBRARIES ${TORCH_LIB}/lib/libcublas-d9343511.so.12)
 endif()
