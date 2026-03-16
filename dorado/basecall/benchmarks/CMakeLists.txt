@@ -3,6 +3,7 @@ if(DORADO_ROCM_BUILD)
         CudaChunkBenchmarks.cpp
         CudaChunkBenchmarks.h
     )
+    target_compile_definitions(dorado_benchmarks PUBLIC DORADO_ROCM_BUILD=1)
 else()
     add_library(dorado_benchmarks STATIC
         CudaChunkBenchmarks.cpp
