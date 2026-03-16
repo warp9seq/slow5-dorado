@@ -27,8 +27,13 @@
 #if DORADO_CUDA_BUILD
 #include "torch_utils/cuda_utils.h"
 
+#if DORADO_ROCM_BUILD
+#include <c10/hip/HIPCachingAllocator.h>
+#include <c10/hip/HIPGuard.h>
+#else
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGuard.h>
+#endif
 #endif
 
 // #define DEBUG_POLISH_SAMPLE_CONSTRUCTION
@@ -124,8 +129,13 @@ PolisherResources create_resources(const secondary::ModelConfig& model_config,
                 c10::optional<c10::Stream> stream;
 #if DORADO_CUDA_BUILD
                 if (device_info.device.is_cuda()) {
+#if DORADO_ROCM_BUILD
+                    c10::hip::HIPGuard device_guard(device_info.device);
+                    stream = c10::hip::getStreamFromPool(false, device_info.device.index());
+#else
                     c10::cuda::CUDAGuard device_guard(device_info.device);
                     stream = c10::cuda::getStreamFromPool(false, device_info.device.index());
+#endif
                 }
 #endif
 
@@ -159,8 +169,13 @@ PolisherResources create_resources(const secondary::ModelConfig& model_config,
                 c10::optional<c10::Stream> stream;
 #if DORADO_CUDA_BUILD
                 if (device_info.device.is_cuda()) {
+#if DORADO_ROCM_BUILD
+                    c10::hip::HIPGuard device_guard(device_info.device);
+                    stream = c10::hip::getStreamFromPool(false, device_info.device.index());
+#else
                     c10::cuda::CUDAGuard device_guard(device_info.device);
                     stream = c10::cuda::getStreamFromPool(false, device_info.device.index());
+#endif
                 }
 #endif
                 ret_streams.emplace_back(std::move(stream));
@@ -1203,7 +1218,11 @@ void infer_samples_in_parallel(
         utils::ScopedProfileRange spr2("infer_samples_in_parallel-worker", 3);
 
 #if DORADO_CUDA_BUILD
+#if DORADO_ROCM_BUILD
+        c10::hip::OptionalHIPStreamGuard guard(stream);
+#else
         c10::cuda::OptionalCUDAStreamGuard guard(stream);
+#endif
 #endif
 
         at::InferenceMode infer_guard;
