@@ -19,7 +19,11 @@
 #if DORADO_CUDA_BUILD
 #include "nn/KoiUtils.h"
 
+#if DORADO_ROCM_BUILD
+#include <c10/hip/HIPGuard.h>
+#else
 #include <c10/cuda/CUDAGuard.h>
+#endif
 #endif
 
 #include <stdexcept>
@@ -495,7 +499,11 @@ struct ModBaseConvLSTMV3CUDAModelImpl : Module {
     at::Tensor forward(const at::Tensor& sigs_N1T, const at::Tensor& seqs_NTC) {
         utils::ScopedProfileRange spr("mbv3 koi", 1);
 
+#if DORADO_ROCM_BUILD
+        c10::hip::HIPGuard device_guard(sigs_N1T.device());
+#else
         c10::cuda::CUDAGuard device_guard(sigs_N1T.device());
+#endif
 
         {
             utils::ScopedProfileRange spr2("seq_copy", 2);
@@ -615,7 +623,11 @@ dorado::utils::ModuleWrapper load_modbase_model(const config::ModBaseModelConfig
     if (options.device().is_cuda()) {
         device = options.device();
     }
+#if DORADO_ROCM_BUILD
+    c10::hip::OptionalHIPGuard device_guard(device);
+#else
     c10::cuda::OptionalCUDAGuard device_guard(device);
+#endif
 #endif
     const auto params = config.general;
     switch (params.model_type) {
@@ -628,7 +640,7 @@ dorado::utils::ModuleWrapper load_modbase_model(const config::ModBaseModelConfig
         return populate_model(std::move(model), config.model_path, options);
     }
     case config::ModelType::CONV_LSTM_V3: {
-#if DORADO_CUDA_BUILD
+#if DORADO_CUDA_BUILD && !DORADO_ROCM_BUILD //todo hm: this needs to be done for ROCM
         static bool use_torch = utils::get_dev_opt("modbase_torch", false);
         if (options.device().is_cuda() && !use_torch) {
             auto model = model::ModBaseConvLSTMV3CUDAModel(config, batchsize);
