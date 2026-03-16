@@ -60,10 +60,12 @@ void emit_benchmark_file(const std::string &gpu_name,
 
     std::string gpu_cuda_variant_name = gpu_name;
     // Hopper has specific optimizations that are only available if we are building with cuda12
+#if !DORADO_ROCM_BUILD
     if (compute_major == 9 || compute_major == 10) {
         gpu_cuda_variant_name.append("_cuda");
         gpu_cuda_variant_name.append(std::to_string(CUDA_VERSION / 1000));
     }
+#endif
 
     std::string cpp_filename = std::string("chunk_benchmarks__")
                                        .append(gpu_cuda_variant_name)
@@ -319,7 +321,11 @@ void CudaCaller::determine_batch_dims(const BasecallerCreationParams &params) {
     auto requested_chunk_size = m_config.basecaller.chunk_size();
     auto requested_batch_size = m_config.basecaller.batch_size();
 
+#if DORADO_ROCM_BUILD
+    c10::hip::HIPGuard device_guard(m_options.device());
+#else
     c10::cuda::CUDAGuard device_guard(m_options.device());
+#endif
     c10::cuda::CUDACachingAllocator::emptyCache();
     int64_t available = utils::available_memory(m_options.device());
     spdlog::debug("{} memory available: {:.2f}GB", m_device, available / GB);
@@ -367,11 +373,19 @@ void CudaCaller::determine_batch_dims(const BasecallerCreationParams &params) {
     // If running on a Jetson device with unified memory for CPU and GPU we can't use all
     // the available memory for GPU tasks. This way we leave at least half for the CPU,
     // though it's not clear what the ideal split would be.
+#if DORADO_ROCM_BUILD
+    hipDeviceProp_t hip_prop_storage;
+    hipGetDeviceProperties(&hip_prop_storage, m_options.device().index());
+    auto *prop = &hip_prop_storage;
+    // todo hm: may be need a change later
+    bool is_unified_memory_device = false;
+#else
     cudaDeviceProp *prop = at::cuda::getCurrentDeviceProperties();
     bool is_unified_memory_device = (prop->major == 5 && prop->minor == 3) ||  // TX1
                                     (prop->major == 6 && prop->minor == 2) ||  // TX2
                                     (prop->major == 7 && prop->minor == 2) ||  // Xavier
                                     (prop->major == 8 && prop->minor == 7);    // Orin
+#endif
     float memory_limit_fraction =
             params.memory_limit_fraction * (is_unified_memory_device ? 0.5f : 1.f);
     if (is_unified_memory_device && prop->major == 8 && available > (32 * GB)) {
@@ -488,7 +502,11 @@ void CudaCaller::determine_batch_dims(const BasecallerCreationParams &params) {
 
             for (int i = 0; i < 2; ++i) {  // run twice to eliminate outliers
                 using utils::handle_cuda_result;
+#if DORADO_ROCM_BUILD
+                hipEvent_t start, stop;
+#else
                 cudaEvent_t start, stop;
+#endif
                 handle_cuda_result(cudaEventCreate(&start));
                 handle_cuda_result(cudaEventCreate(&stop));
                 handle_cuda_result(cudaEventRecord(start));
