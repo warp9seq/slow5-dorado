@@ -11,9 +11,12 @@
 #include <nvtx3/nvtx3.hpp>
 #endif
 
+//todo hm: KOI
+#if !DORADO_ROCM_BUILD
 extern "C" {
 #include "koi.h"
 }
+#endif
 
 namespace dorado::basecall::decode {
 
