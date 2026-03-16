@@ -134,7 +134,7 @@ MatmulMode get_cuda_matmul_fp16_mode() {
     // torch::matmul() is a bit slower than cublasGemmEx() on A100 and V100, and 2x slower on TX2
     // but an order of magnitude faster on 1080 Ti (sm61)
 #if DORADO_ROCM_BUILD
-    // ROCm uses hipBLAS; default to TORCH to avoid extra hipBLAS dependency.
+    // todo hm: need to figure out how to do hipblas
     return MatmulMode::TORCH;
 #else
     cudaDeviceProp *prop = at::cuda::getCurrentDeviceProperties();
@@ -469,17 +469,9 @@ void matmul_f16_cublas(const at::Tensor &A, const at::Tensor &B, at::Tensor &C) 
     assert(B.size(1) == C.size(1));  // N
     assert(A.size(1) == B.size(0));  // K
 #if DORADO_ROCM_BUILD
-    auto res = hipblasGemmEx(
-            reinterpret_cast<hipblasHandle_t>(at::cuda::getCurrentCUDABlasHandle()),
-            HIPBLAS_OP_N, HIPBLAS_OP_N,
-            int(B.size(1)), int(A.size(0)), int(A.size(1)), &HALF_ONE, B.data_ptr(),
-            HIPBLAS_R_16F, int(B.stride(0)), A.data_ptr(), HIPBLAS_R_16F,
-            int(A.stride(0)), &HALF_ZERO, C.data_ptr(), HIPBLAS_R_16F,
-            int(C.stride(0)), HIPBLAS_R_16F, HIPBLAS_GEMM_DEFAULT);
-    if (res != HIPBLAS_STATUS_SUCCESS) {
-        spdlog::error("hipBLAS error {}", int(res));
-        exit(EXIT_FAILURE);
-    }
+    // todo hm: need to figure out how to do hipblas
+    spdlog::error("HipBLAS not implemented error");
+    exit(EXIT_FAILURE);
 #else
     auto res = cublasGemmEx(at::cuda::getCurrentCUDABlasHandle(), CUBLAS_OP_N, CUBLAS_OP_N,
                             int(B.size(1)), int(A.size(0)), int(A.size(1)), &HALF_ONE, B.data_ptr(),
