@@ -55,9 +55,7 @@ else()
             CudaModelRunner.cpp
             decode/CUDADecoder.cpp
     )
-    if(NOT DORADO_ROCM_BUILD) #todo hm: this for ROCM?
-        target_link_libraries(dorado_basecall PRIVATE dorado_benchmarks)
-    endif()
+    target_link_libraries(dorado_basecall PRIVATE dorado_benchmarks)
 endif()
 
 if (TARGET koi)

@@ -1,21 +1,25 @@
 #include "CudaChunkBenchmarks.h"
 
+#if !DORADO_ROCM_BUILD
 #include "NVIDIA_A100_80GB_PCIe.h"
 #include "NVIDIA_H100_NVL.h"
 #include "NVIDIA_RTX_A6000.h"
 #include "Orin.h"
 #include "Quadro_GV100.h"
 #include "Tesla_V100-PCIE-16GB.h"
+#endif
 
 namespace dorado::basecall {
 
 CudaChunkBenchmarks::CudaChunkBenchmarks() {
+#if !DORADO_ROCM_BUILD
     AddNVIDIA_A100_80GB_PCIeBenchmarks(m_chunk_benchmarks);
     AddNVIDIA_H100_NVLBenchmarks(m_chunk_benchmarks);
     AddNVIDIA_RTX_A6000Benchmarks(m_chunk_benchmarks);
     AddOrinBenchmarks(m_chunk_benchmarks);
     AddQuadro_GV100Benchmarks(m_chunk_benchmarks);
     AddTesla_V100_PCIE_16GBBenchmarks(m_chunk_benchmarks);
+#endif
 }
 
 std::optional<const CudaChunkBenchmarks::ChunkTimings>

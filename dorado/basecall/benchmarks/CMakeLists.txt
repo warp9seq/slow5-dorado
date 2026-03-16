@@ -1,5 +1,8 @@
 if(DORADO_ROCM_BUILD)
-
+    add_library(dorado_benchmarks STATIC
+        CudaChunkBenchmarks.cpp
+        CudaChunkBenchmarks.h
+    )
 else()
     add_library(dorado_benchmarks STATIC
         CudaChunkBenchmarks.cpp
