@@ -202,6 +202,20 @@ list(PREPEND CMAKE_PREFIX_PATH "${TORCH_LIB}")
 
 find_package(Torch REQUIRED)
 
+# ROCm PyTorch injects -std=c++17 into its interface compile options, which overrides our
+# CMAKE_CXX_STANDARD 20 setting (since it appears later on the command line). Strip it out.
+if(DORADO_ROCM_BUILD)
+    foreach(_target torch torch_cpu torch_cuda c10)
+        if(TARGET ${_target})
+            get_target_property(_opts ${_target} INTERFACE_COMPILE_OPTIONS)
+            if(_opts)
+                list(REMOVE_ITEM _opts "-std=c++17")
+                set_target_properties(${_target} PROPERTIES INTERFACE_COMPILE_OPTIONS "${_opts}")
+            endif()
+        endif()
+    endforeach()
+endif()
+
 if(APPLE)
     set(TORCH_BUILD_VERSION ${TORCH_VERSION})
 else()
