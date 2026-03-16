@@ -504,9 +504,20 @@ void CudaCaller::determine_batch_dims(const BasecallerCreationParams &params) {
                 using utils::handle_cuda_result;
 #if DORADO_ROCM_BUILD
                 hipEvent_t start, stop;
+                handle_cuda_result(hipEventCreate(&start));
+                handle_cuda_result(hipEventCreate(&stop));
+                handle_cuda_result(hipEventRecord(start, 0));
+                m_module->forward(input);
+                handle_cuda_result(hipEventRecord(stop, 0));
+                handle_cuda_result(hipEventSynchronize(stop));
+                float ms = 0;
+                handle_cuda_result(hipEventElapsedTime(&ms, start, stop));
+                auto time_this_iteration = ms / batch_size;
+                time = std::min(time, time_this_iteration);
+                handle_cuda_result(hipEventDestroy(start));
+                handle_cuda_result(hipEventDestroy(stop));
 #else
                 cudaEvent_t start, stop;
-#endif
                 handle_cuda_result(cudaEventCreate(&start));
                 handle_cuda_result(cudaEventCreate(&stop));
                 handle_cuda_result(cudaEventRecord(start));
@@ -519,6 +530,7 @@ void CudaCaller::determine_batch_dims(const BasecallerCreationParams &params) {
                 time = std::min(time, time_this_iteration);
                 handle_cuda_result(cudaEventDestroy(start));
                 handle_cuda_result(cudaEventDestroy(stop));
+#endif
                 spdlog::trace("Auto batchsize {}: iteration:{}, ms/chunk {:8f} ms", m_device, i,
                               time_this_iteration);
             }
@@ -633,6 +645,7 @@ void CudaCaller::cuda_thread_fn() {
         }
 
         std::unique_lock<std::mutex> task_lock(task->mut);
+#if !DORADO_ROCM_BUILD //todo hm: this part needs to be implemented for ROCM
         auto device_stats =
                 c10::cuda::CUDACachingAllocator::getDeviceStats(m_options.device().index());
 
@@ -655,6 +668,7 @@ void CudaCaller::cuda_thread_fn() {
 #endif  // TORCH_VERSION_MAJOR > 1
                 device_stats.num_alloc_retries, device_stats.num_alloc_retries,
                 device_stats.num_ooms, device_stats.max_split_size);
+#endif  // !DORADO_ROCM_BUILD
 
         auto run_basecalling = [&]() {
             stats::Timer timer;
