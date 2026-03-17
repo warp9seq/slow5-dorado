@@ -1,6 +1,5 @@
 OPTION(BUILD_KOI_FROM_SOURCE OFF)
 
-# Koi is an NVIDIA-only library; skip it entirely for ROCm builds.
 if(DORADO_ROCM_BUILD)
     return()
 endif()
