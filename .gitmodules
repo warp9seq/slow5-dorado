@@ -42,3 +42,6 @@
 [submodule "dorado/3rdparty/slow5lib"]
 	path = dorado/3rdparty/slow5lib
 	url = https://github.com/hasindu2008/slow5lib.git
+[submodule "dorado/3rdparty/openfish"]
+	path = dorado/3rdparty/openfish
+	url = git@github.com:warp9seq/openfish.git
