@@ -65,6 +65,7 @@ DecodeData CUDADecoder::beam_search_part_1(DecodeData data) const {
 
 #if DORADO_ROCM_BUILD //todo hm: is this cores.device().index() needed?
     auto stream = at::hip::getCurrentHIPStream(scores.device().index()).stream();
+    fprintf(stderr,"Bonfire, please do the rest here.");
 #else
     auto stream = at::cuda::getCurrentCUDAStream().stream();
 #endif
