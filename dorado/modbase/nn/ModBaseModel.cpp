@@ -624,7 +624,7 @@ dorado::utils::ModuleWrapper load_modbase_model(const config::ModBaseModelConfig
         device = options.device();
     }
 #if DORADO_ROCM_BUILD
-    c10::hip::OptionalHIPGuard device_guard(device.index());
+    c10::hip::OptionalHIPGuard device_guard(options.device().index());
 #else
     c10::cuda::OptionalCUDAGuard device_guard(device);
 #endif
