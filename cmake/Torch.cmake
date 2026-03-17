@@ -122,6 +122,7 @@ else()
             if(DORADO_ROCM_BUILD)
                 # todo hm: check for abi, rocm versions and sha hashes etc
                 set(ROCM_TORCH_VERSION 2.9.0)
+                set(TORCH_VERSION ${ROCM_TORCH_VERSION})
                 set(TORCH_URL "https://download.pytorch.org/libtorch/rocm6.4/libtorch-shared-with-deps-2.9.0%2Brocm6.4.zip")
                 set(TORCH_HASH "cca94e1b5a020e7e5a9ab39b19a5d3433698f551f58915f852d51119bb7b8f6b")
                 set(TORCH_PATCH_SUFFIX -cxx11-abi)
