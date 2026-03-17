@@ -39,6 +39,6 @@ if (TARGET koi)
     target_link_libraries(dorado_nn PRIVATE koi)
 endif()
 
-if (TARGET openfish)
-    target_link_libraries(dorado_nn PRIVATE openfish)
+if (TARGET fakekoi)
+    target_link_libraries(dorado_nn PRIVATE fakekoi)
 endif()

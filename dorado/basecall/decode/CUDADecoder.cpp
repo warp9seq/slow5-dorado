@@ -14,7 +14,7 @@
 extern "C" {
 
 #ifdef DORADO_ROCM_BUILD
-#include "openfish.h"
+#include "fakekoi.h"
 #else
 #include "koi.h"
 #endif

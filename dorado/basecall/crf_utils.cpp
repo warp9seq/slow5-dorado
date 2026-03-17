@@ -194,7 +194,7 @@ ModuleHolder<AnyModule> load_crf_model(const BasecallModelConfig &model_config,
         device = options.device();
     }
 #if DORADO_ROCM_BUILD
-    c10::hip::OptionalHIPGuard device_guard(options.device().index());
+    c10::hip::OptionalHIPGuard device_guard(options.device().index()); //todo hm: this might need a fix for is_hip()?
 #else
     c10::cuda::OptionalCUDAGuard device_guard(device);
 #endif
