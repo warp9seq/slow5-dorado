@@ -103,7 +103,7 @@ c10::hip::HIPStream get_stream_for_device(c10::Device device) {
     return c10::hip::getStreamFromPool(false, device.index());
 }
 #else
-c10::cuda::CUDAStream get_stream_for_device(c10::Device device) {
+    c10::cuda::CUDAStream get_stream_for_device(c10::Device device) {
     c10::cuda::CUDAGuard device_guard(device);
     return c10::cuda::getStreamFromPool(false, device.index());
 }
