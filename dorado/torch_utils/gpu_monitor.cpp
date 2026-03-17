@@ -747,9 +747,9 @@ class RsmiApi final {
     bool load_symbols() {
         if (!load_symbol(m_init,             "rsmi_init",             false)) return false;
         if (!load_symbol(m_shut_down,        "rsmi_shut_down",        false)) return false;
-        if (!load_symbol(m_num_monitor_devs, "rsmi_num_monitor_devs", false)) return false;
         if (!load_symbol(m_dev_name_get,     "rsmi_dev_name_get",     false)) return false;
         if (!load_symbol(m_status_string,    "rsmi_status_string",    false)) return false;
+        load_symbol(m_num_monitor_devs, "rsmi_num_monitor_devs", true);
         load_symbol(m_dev_temp_metric_get,         "rsmi_dev_temp_metric_get",         true);
         load_symbol(m_dev_power_ave_get,           "rsmi_dev_power_ave_get",           true);
         load_symbol(m_dev_power_cap_default_get,   "rsmi_dev_power_cap_default_get",   true);
@@ -811,7 +811,17 @@ public:
     uint32_t DeviceGetCount() {
         uint32_t count = 0;
         if (m_num_monitor_devs) {
-            m_num_monitor_devs(&count);
+            if (m_num_monitor_devs(&count) == RSMI_STATUS_SUCCESS) {
+                return count;
+            }
+            count = 0;
+        }
+        // Fallback: probe by index until rsmi_dev_name_get fails.
+        constexpr uint32_t MAX_DEVICES = 64;
+        char name[RSMI_NAME_BUFFER_SIZE];
+        while (count < MAX_DEVICES &&
+               m_dev_name_get(count, name, RSMI_NAME_BUFFER_SIZE) == RSMI_STATUS_SUCCESS) {
+            ++count;
         }
         return count;
     }
