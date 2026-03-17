@@ -2,11 +2,17 @@
 
 #include "utils/sys_utils.h"
 
-//todo hm:add ROCM version for nvml
 #if (defined(_WIN32) || defined(__linux__)) && !DORADO_ROCM_BUILD
 #define HAS_NVML 1
 #else
 #define HAS_NVML 0
+#endif
+
+// ROCm SMI support (Linux ROCm builds only)
+#if defined(__linux__) && DORADO_ROCM_BUILD
+#define HAS_RSMI 1
+#else
+#define HAS_RSMI 0
 #endif
 
 #if HAS_NVML
@@ -23,6 +29,13 @@
 #include <torch/torch.h>
 #endif  // DORADO_ORIN
 #endif  // HAS_NVML
+
+#if HAS_RSMI
+#include "utils/scoped_trace_log.h"
+#include "utils/string_utils.h"
+
+#include <dlfcn.h>
+#endif  // HAS_RSMI
 
 #include <spdlog/spdlog.h>
 
@@ -647,7 +660,506 @@ std::optional<std::string> read_version_from_nvml() {
 
 #endif  // HAS_NVML
 
-#if defined(__linux__)
+#if HAS_RSMI
+// Minimal ROCm SMI type definitions for dynamic loading.
+// These match the stable ABI of librocm_smi64 and avoid a compile-time
+// dependency on rocm_smi headers.
+using rsmi_status_t = int;
+constexpr rsmi_status_t RSMI_STATUS_SUCCESS = 0;
+
+// Temperature metrics (rsmi_temperature_metric_t stable ABI values)
+constexpr uint32_t RSMI_TEMP_CURRENT   = 0;  // Current temperature
+constexpr uint32_t RSMI_TEMP_MAX       = 6;  // Max operating temperature
+constexpr uint32_t RSMI_TEMP_CRIT      = 7;  // Critical (slowdown) threshold
+constexpr uint32_t RSMI_TEMP_EMERGENCY = 9;  // Emergency (shutdown) threshold
+
+// Temperature sensor type (rsmi_temperature_type_t stable ABI values)
+constexpr uint32_t RSMI_TEMP_TYPE_EDGE = 0;  // Edge/GPU die temperature sensor
+
+// Buffer sizes
+constexpr size_t RSMI_NAME_BUFFER_SIZE           = 256;
+constexpr size_t RSMI_DRIVER_VERSION_BUFFER_SIZE = 256;
+
+// Function pointer type aliases (matching ROCm SMI stable ABI)
+using rsmi_init_fn                        = rsmi_status_t (*)(uint64_t);
+using rsmi_shut_down_fn                   = rsmi_status_t (*)();
+using rsmi_num_monitor_devs_fn            = rsmi_status_t (*)(uint32_t *);
+using rsmi_dev_name_get_fn                = rsmi_status_t (*)(uint32_t, char *, size_t);
+using rsmi_dev_temp_metric_get_fn         = rsmi_status_t (*)(uint32_t, uint32_t, uint32_t, int64_t *);
+using rsmi_dev_power_ave_get_fn           = rsmi_status_t (*)(uint32_t, uint32_t, uint64_t *);
+using rsmi_dev_power_cap_default_get_fn   = rsmi_status_t (*)(uint32_t, uint64_t *);
+using rsmi_dev_busy_percent_get_fn        = rsmi_status_t (*)(uint32_t, uint32_t *);
+using rsmi_dev_memory_busy_percent_get_fn = rsmi_status_t (*)(uint32_t, uint32_t *);
+using rsmi_dev_perf_level_get_fn          = rsmi_status_t (*)(uint32_t, uint32_t *);
+using rsmi_status_string_fn               = rsmi_status_t (*)(rsmi_status_t, const char **);
+using rsmi_driver_version_str_get_fn      = rsmi_status_t (*)(char *, size_t);
+
+/**
+ * Handle to the ROCm SMI API.
+ * Dynamically loads librocm_smi64.so and manages library lifetime.
+ */
+class RsmiApi final {
+    void *m_handle = nullptr;
+
+    bool platform_open() {
+        for (const char *path : {"librocm_smi64.so.5", "librocm_smi64.so"}) {
+            m_handle = dlopen(path, RTLD_NOW);
+            if (m_handle != nullptr) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void platform_close() {
+        if (m_handle != nullptr) {
+            dlclose(m_handle);
+            m_handle = nullptr;
+        }
+    }
+
+    template <typename T>
+    bool load_symbol(T *&func_ptr, const char *name, bool optional) {
+        func_ptr = reinterpret_cast<T *>(dlsym(m_handle, name));
+        if (func_ptr == nullptr && !optional) {
+            spdlog::warn("Failed to load ROCm SMI symbol {}: {}", name, dlerror());
+            return false;
+        }
+        return true;
+    }
+
+    // Required function pointers
+    rsmi_init_fn             m_init             = nullptr;
+    rsmi_shut_down_fn        m_shut_down        = nullptr;
+    rsmi_num_monitor_devs_fn m_num_monitor_devs = nullptr;
+    rsmi_dev_name_get_fn     m_dev_name_get     = nullptr;
+    rsmi_status_string_fn    m_status_string    = nullptr;
+
+    // Optional function pointers (availability depends on ROCm version)
+    rsmi_dev_temp_metric_get_fn         m_dev_temp_metric_get         = nullptr;
+    rsmi_dev_power_ave_get_fn           m_dev_power_ave_get           = nullptr;
+    rsmi_dev_power_cap_default_get_fn   m_dev_power_cap_default_get   = nullptr;
+    rsmi_dev_busy_percent_get_fn        m_dev_busy_percent_get        = nullptr;
+    rsmi_dev_memory_busy_percent_get_fn m_dev_memory_busy_percent_get = nullptr;
+    rsmi_dev_perf_level_get_fn          m_dev_perf_level_get          = nullptr;
+    rsmi_driver_version_str_get_fn      m_driver_version_str_get      = nullptr;
+
+    bool load_symbols() {
+        if (!load_symbol(m_init,             "rsmi_init",             false)) return false;
+        if (!load_symbol(m_shut_down,        "rsmi_shut_down",        false)) return false;
+        if (!load_symbol(m_num_monitor_devs, "rsmi_num_monitor_devs", false)) return false;
+        if (!load_symbol(m_dev_name_get,     "rsmi_dev_name_get",     false)) return false;
+        if (!load_symbol(m_status_string,    "rsmi_status_string",    false)) return false;
+        load_symbol(m_dev_temp_metric_get,         "rsmi_dev_temp_metric_get",         true);
+        load_symbol(m_dev_power_ave_get,           "rsmi_dev_power_ave_get",           true);
+        load_symbol(m_dev_power_cap_default_get,   "rsmi_dev_power_cap_default_get",   true);
+        load_symbol(m_dev_busy_percent_get,        "rsmi_dev_busy_percent_get",        true);
+        load_symbol(m_dev_memory_busy_percent_get, "rsmi_dev_memory_busy_percent_get", true);
+        load_symbol(m_dev_perf_level_get,          "rsmi_dev_perf_level_get",          true);
+        load_symbol(m_driver_version_str_get,      "rsmi_driver_version_str_get",      true);
+        return true;
+    }
+
+    void clear_symbols() {
+        m_init                        = nullptr;
+        m_shut_down                   = nullptr;
+        m_num_monitor_devs            = nullptr;
+        m_dev_name_get                = nullptr;
+        m_status_string               = nullptr;
+        m_dev_temp_metric_get         = nullptr;
+        m_dev_power_ave_get           = nullptr;
+        m_dev_power_cap_default_get   = nullptr;
+        m_dev_busy_percent_get        = nullptr;
+        m_dev_memory_busy_percent_get = nullptr;
+        m_dev_perf_level_get          = nullptr;
+        m_driver_version_str_get      = nullptr;
+    }
+
+    void init() {
+        if (!platform_open() || !load_symbols()) {
+            spdlog::info("Failed to load ROCm SMI library");
+            clear_symbols();
+            platform_close();
+            return;
+        }
+        auto result = m_init(0);
+        if (result != RSMI_STATUS_SUCCESS) {
+            spdlog::warn("Failed to initialize ROCm SMI: error {}", result);
+            clear_symbols();
+            platform_close();
+        }
+    }
+
+    void shutdown() {
+        if (m_shut_down != nullptr) {
+            m_shut_down();
+        }
+        clear_symbols();
+        platform_close();
+    }
+
+    RsmiApi(const RsmiApi &) = delete;
+    RsmiApi &operator=(const RsmiApi &) = delete;
+
+    friend class RsmiDeviceInfoCache;
+    RsmiApi() { init(); }
+    ~RsmiApi() { shutdown(); }
+
+public:
+    bool is_loaded() const { return m_handle != nullptr; }
+
+    uint32_t DeviceGetCount() {
+        uint32_t count = 0;
+        if (m_num_monitor_devs) {
+            m_num_monitor_devs(&count);
+        }
+        return count;
+    }
+
+    rsmi_status_t DeviceGetName(uint32_t dv_ind, char *name, size_t len) {
+        ScopedTraceLog log{__func__};
+        return m_dev_name_get(dv_ind, name, len);
+    }
+
+    // Returns temperature in degrees Celsius (RSMI reports in millidegrees).
+    rsmi_status_t DeviceGetTemperature(uint32_t dv_ind, uint32_t metric, unsigned int *temp_c) {
+        ScopedTraceLog log{__func__};
+        if (!m_dev_temp_metric_get) {
+            return -1;
+        }
+        int64_t temp_mdeg = 0;
+        auto result = m_dev_temp_metric_get(dv_ind, RSMI_TEMP_TYPE_EDGE, metric, &temp_mdeg);
+        if (result == RSMI_STATUS_SUCCESS) {
+            *temp_c = static_cast<unsigned int>(temp_mdeg / 1000);
+        }
+        return result;
+    }
+
+    // Returns power in milliwatts (RSMI reports in microwatts).
+    rsmi_status_t DeviceGetPowerUsage(uint32_t dv_ind, unsigned int *power_mw) {
+        ScopedTraceLog log{__func__};
+        if (!m_dev_power_ave_get) {
+            return -1;
+        }
+        uint64_t power_uw = 0;
+        auto result = m_dev_power_ave_get(dv_ind, 0, &power_uw);
+        if (result == RSMI_STATUS_SUCCESS) {
+            *power_mw = static_cast<unsigned int>(power_uw / 1000);
+        }
+        return result;
+    }
+
+    // Returns default power cap in milliwatts (RSMI reports in microwatts).
+    rsmi_status_t DeviceGetPowerCapDefault(uint32_t dv_ind, unsigned int *cap_mw) {
+        ScopedTraceLog log{__func__};
+        if (!m_dev_power_cap_default_get) {
+            return -1;
+        }
+        uint64_t cap_uw = 0;
+        auto result = m_dev_power_cap_default_get(dv_ind, &cap_uw);
+        if (result == RSMI_STATUS_SUCCESS) {
+            *cap_mw = static_cast<unsigned int>(cap_uw / 1000);
+        }
+        return result;
+    }
+
+    rsmi_status_t DeviceGetBusyPercent(uint32_t dv_ind, uint32_t *busy_percent) {
+        ScopedTraceLog log{__func__};
+        if (!m_dev_busy_percent_get) {
+            return -1;
+        }
+        return m_dev_busy_percent_get(dv_ind, busy_percent);
+    }
+
+    rsmi_status_t DeviceGetMemoryBusyPercent(uint32_t dv_ind, uint32_t *busy_percent) {
+        ScopedTraceLog log{__func__};
+        if (!m_dev_memory_busy_percent_get) {
+            return -1;
+        }
+        return m_dev_memory_busy_percent_get(dv_ind, busy_percent);
+    }
+
+    rsmi_status_t DeviceGetPerfLevel(uint32_t dv_ind, uint32_t *perf_level) {
+        ScopedTraceLog log{__func__};
+        if (!m_dev_perf_level_get) {
+            return -1;
+        }
+        return m_dev_perf_level_get(dv_ind, perf_level);
+    }
+
+    std::optional<std::string> GetDriverVersion() {
+        if (!m_driver_version_str_get) {
+            return std::nullopt;
+        }
+        char version[RSMI_DRIVER_VERSION_BUFFER_SIZE] = {};
+        auto result = m_driver_version_str_get(version, RSMI_DRIVER_VERSION_BUFFER_SIZE);
+        if (result == RSMI_STATUS_SUCCESS && version[0] != '\0') {
+            return std::string(version);
+        }
+        return std::nullopt;
+    }
+
+    const char *ErrorString(rsmi_status_t result) {
+        const char *str = nullptr;
+        if (m_status_string && m_status_string(result, &str) == RSMI_STATUS_SUCCESS && str) {
+            return str;
+        }
+        return "unknown ROCm SMI error";
+    }
+};
+
+void retrieve_and_assign_rsmi_current_temperature(RsmiApi *rsmi, uint32_t dv_ind,
+                                                   DeviceStatusInfo &info) {
+    unsigned int temp = 0;
+    auto result = rsmi->DeviceGetTemperature(dv_ind, RSMI_TEMP_CURRENT, &temp);
+    if (result == RSMI_STATUS_SUCCESS) {
+        info.current_temperature = temp;
+    } else {
+        info.current_temperature_error = rsmi->ErrorString(result);
+    }
+}
+
+void retrieve_and_assign_rsmi_threshold_temperatures(RsmiApi *rsmi, uint32_t dv_ind,
+                                                      DeviceStatusInfo &info) {
+    // Emergency threshold maps to NVML's SHUTDOWN threshold
+    {
+        unsigned int temp = 0;
+        auto result = rsmi->DeviceGetTemperature(dv_ind, RSMI_TEMP_EMERGENCY, &temp);
+        if (result == RSMI_STATUS_SUCCESS) {
+            info.gpu_shutdown_temperature = temp;
+        } else {
+            info.gpu_shutdown_temperature_error = rsmi->ErrorString(result);
+        }
+    }
+    // Critical threshold maps to NVML's SLOWDOWN threshold
+    {
+        unsigned int temp = 0;
+        auto result = rsmi->DeviceGetTemperature(dv_ind, RSMI_TEMP_CRIT, &temp);
+        if (result == RSMI_STATUS_SUCCESS) {
+            info.gpu_slowdown_temperature = temp;
+        } else {
+            info.gpu_slowdown_temperature_error = rsmi->ErrorString(result);
+        }
+    }
+    // Max operating threshold maps to NVML's GPU_MAX threshold
+    {
+        unsigned int temp = 0;
+        auto result = rsmi->DeviceGetTemperature(dv_ind, RSMI_TEMP_MAX, &temp);
+        if (result == RSMI_STATUS_SUCCESS) {
+            info.gpu_max_operating_temperature = temp;
+        } else {
+            info.gpu_max_operating_temperature_error = rsmi->ErrorString(result);
+        }
+    }
+}
+
+void retrieve_and_assign_rsmi_power_usage(RsmiApi *rsmi, uint32_t dv_ind,
+                                           DeviceStatusInfo &info) {
+    unsigned int power_mw = 0;
+    auto result = rsmi->DeviceGetPowerUsage(dv_ind, &power_mw);
+    if (result == RSMI_STATUS_SUCCESS) {
+        info.current_power_usage = power_mw;
+    } else {
+        info.current_power_usage_error = rsmi->ErrorString(result);
+    }
+}
+
+void retrieve_and_assign_rsmi_power_cap(RsmiApi *rsmi, uint32_t dv_ind, DeviceStatusInfo &info) {
+    unsigned int cap_mw = 0;
+    auto result = rsmi->DeviceGetPowerCapDefault(dv_ind, &cap_mw);
+    if (result == RSMI_STATUS_SUCCESS) {
+        info.default_power_cap = cap_mw;
+    } else {
+        info.default_power_cap_error = rsmi->ErrorString(result);
+    }
+}
+
+void retrieve_and_assign_rsmi_utilization(RsmiApi *rsmi, uint32_t dv_ind, DeviceStatusInfo &info) {
+    uint32_t busy_percent = 0;
+    auto result = rsmi->DeviceGetBusyPercent(dv_ind, &busy_percent);
+    if (result != RSMI_STATUS_SUCCESS) {
+        info.percentage_utilization_error = rsmi->ErrorString(result);
+        return;
+    }
+    info.percentage_utilization_gpu = busy_percent;
+    uint32_t mem_busy_percent = 0;
+    result = rsmi->DeviceGetMemoryBusyPercent(dv_ind, &mem_busy_percent);
+    if (result == RSMI_STATUS_SUCCESS) {
+        info.percentage_utilization_memory = mem_busy_percent;
+    }
+    // A failure to retrieve memory utilization is non-critical; GPU utilization was retrieved.
+}
+
+void retrieve_and_assign_rsmi_perf_level(RsmiApi *rsmi, uint32_t dv_ind, DeviceStatusInfo &info) {
+    uint32_t perf_level = 0;
+    auto result = rsmi->DeviceGetPerfLevel(dv_ind, &perf_level);
+    if (result == RSMI_STATUS_SUCCESS) {
+        info.current_performance_state = perf_level;
+    } else {
+        info.current_performance_state_error = rsmi->ErrorString(result);
+    }
+}
+
+class RsmiDeviceInfoCache final {
+    std::mutex m_mutex{};
+    RsmiApi m_rsmi{};
+    std::unordered_map<uint32_t, std::optional<DeviceStatusInfo>> m_static_device_info{};
+    unsigned int m_device_count = 0;
+    std::vector<uint32_t> m_visible_device_indices;
+
+    RsmiDeviceInfoCache() { set_device_count(); }
+
+    void map_visible_devices(uint32_t device_count) {
+        // ROCm uses HIP_VISIBLE_DEVICES (or ROCR_VISIBLE_DEVICES) similarly to CUDA_VISIBLE_DEVICES.
+        const char *hip_visible_devices_env = std::getenv("HIP_VISIBLE_DEVICES");
+        if (hip_visible_devices_env == nullptr) {
+            hip_visible_devices_env = std::getenv("ROCR_VISIBLE_DEVICES");
+        }
+        if (hip_visible_devices_env != nullptr) {
+            spdlog::debug("Found HIP_VISIBLE_DEVICES={}", hip_visible_devices_env);
+            std::set<int> used_ids;
+            auto device_ids = utils::split(hip_visible_devices_env, ',');
+            if (device_ids.size() > device_count) {
+                spdlog::error(
+                        "HIP_VISIBLE_DEVICES={} specifies more device ids than the number of "
+                        "GPUs present",
+                        hip_visible_devices_env);
+                throw std::runtime_error("Invalid device ids");
+            }
+            std::string_view last_device_id;
+            try {
+                for (const auto &id : device_ids) {
+                    last_device_id = id;
+                    int index = std::stoi(id);
+                    if (index < 0 || index >= static_cast<int>(device_count)) {
+                        spdlog::warn(
+                                "Invalid index '{}' for GPU device - skipping further device "
+                                "enumeration",
+                                index);
+                        break;
+                    }
+                    used_ids.insert(index);
+                    m_visible_device_indices.push_back(static_cast<uint32_t>(index));
+                }
+            } catch (const std::exception &) {
+                spdlog::warn(
+                        "Unable to parse id '{}' for GPU device - skipping further device "
+                        "enumeration",
+                        last_device_id);
+            }
+            if (used_ids.size() != m_visible_device_indices.size()) {
+                spdlog::warn("Duplicate GPU ids detected - no GPUs identified");
+                m_visible_device_indices.clear();
+            }
+        } else {
+            m_visible_device_indices.resize(device_count);
+            std::iota(std::begin(m_visible_device_indices), std::end(m_visible_device_indices),
+                      static_cast<uint32_t>(0));
+        }
+    }
+
+    void set_device_count() {
+        uint32_t device_count = 0;
+        if (m_rsmi.is_loaded()) {
+            device_count = m_rsmi.DeviceGetCount();
+        }
+        map_visible_devices(device_count);
+        auto visible_count = static_cast<unsigned int>(m_visible_device_indices.size());
+        if (visible_count > static_cast<unsigned int>(device_count)) {
+            spdlog::warn(
+                    "HIP_VISIBLE_DEVICES contains more device ids ({}) than devices found by "
+                    "ROCm SMI ({}).",
+                    visible_count, device_count);
+        }
+        m_device_count = std::min(visible_count, static_cast<unsigned int>(device_count));
+    }
+
+    std::optional<DeviceStatusInfo> create_static_device_entry(unsigned int device_index,
+                                                                uint32_t dv_ind) {
+        auto &info = m_static_device_info.emplace(dv_ind, DeviceStatusInfo{}).first->second;
+        info->device_index = device_index;
+        {
+            char name[RSMI_NAME_BUFFER_SIZE] = {};
+            auto result = m_rsmi.DeviceGetName(dv_ind, name, RSMI_NAME_BUFFER_SIZE);
+            if (result == RSMI_STATUS_SUCCESS) {
+                info->device_name = name;
+            } else {
+                info->device_name_error = m_rsmi.ErrorString(result);
+            }
+        }
+        retrieve_and_assign_rsmi_threshold_temperatures(&m_rsmi, dv_ind, *info);
+        retrieve_and_assign_rsmi_power_cap(&m_rsmi, dv_ind, *info);
+        return info;
+    }
+
+    std::pair<std::optional<DeviceStatusInfo>, uint32_t> get_cached_device_info(
+            unsigned int device_index) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const uint32_t dv_ind = m_visible_device_indices[device_index];
+        auto cached = m_static_device_info.find(dv_ind);
+        if (cached != m_static_device_info.end()) {
+            return {cached->second, dv_ind};
+        }
+        return {create_static_device_entry(device_index, dv_ind), dv_ind};
+    }
+
+public:
+    static RsmiDeviceInfoCache &instance() {
+        static RsmiDeviceInfoCache cache;
+        return cache;
+    }
+
+    RsmiApi &rsmi() { return m_rsmi; }
+
+    unsigned int get_device_count() const { return m_device_count; }
+
+    bool is_device_accessible(unsigned int device_index) const {
+        return m_rsmi.is_loaded() && device_index < m_device_count;
+    }
+
+    std::optional<DeviceStatusInfo> get_device_info(unsigned int device_index) {
+        if (!m_rsmi.is_loaded()) {
+            return std::nullopt;
+        }
+        auto [info, dv_ind] = get_cached_device_info(device_index);
+        if (!info) {
+            return std::nullopt;
+        }
+        // Fetch dynamic (live) metrics; these are not cached.
+        retrieve_and_assign_rsmi_current_temperature(&m_rsmi, dv_ind, *info);
+        retrieve_and_assign_rsmi_power_usage(&m_rsmi, dv_ind, *info);
+        retrieve_and_assign_rsmi_utilization(&m_rsmi, dv_ind, *info);
+        retrieve_and_assign_rsmi_perf_level(&m_rsmi, dv_ind, *info);
+        // Note: throttle reason bitmask has no ROCm SMI equivalent; left as nullopt.
+        return info;
+    }
+};
+
+std::optional<std::string> read_version_from_rsmi() {
+    auto &rsmi_api = RsmiDeviceInfoCache::instance().rsmi();
+    if (!rsmi_api.is_loaded()) {
+        return std::nullopt;
+    }
+    // Try rsmi_driver_version_str_get if available in this ROCm version.
+    auto version = rsmi_api.GetDriverVersion();
+    if (version) {
+        return version;
+    }
+    // Fall back to reading the amdgpu kernel module version from sysfs.
+    std::ifstream ver_file("/sys/module/amdgpu/version");
+    if (ver_file.is_open()) {
+        std::string line;
+        if (std::getline(ver_file, line) && !line.empty()) {
+            return line;
+        }
+    }
+    spdlog::warn("Failed to retrieve AMD GPU driver version");
+    return std::nullopt;
+}
+
+#endif  // HAS_RSMI
+
+#if defined(__linux__) && !HAS_RSMI
 std::optional<std::string> read_version_from_proc() {
     std::ifstream version_file("/proc/driver/nvidia/version",
                                std::ios_base::in | std::ios_base::binary);
@@ -669,13 +1181,15 @@ std::optional<std::string> read_version_from_proc() {
     spdlog::warn("No version line found in /proc version file");
     return std::nullopt;
 }
-#endif
+#endif  // __linux__ && !HAS_RSMI
 
 }  // namespace
 
 std::optional<DeviceStatusInfo> get_device_status_info(unsigned int device_index) {
 #if HAS_NVML
     return DeviceInfoCache::instance().get_device_info(device_index);
+#elif HAS_RSMI
+    return RsmiDeviceInfoCache::instance().get_device_info(device_index);
 #else
     (void)device_index;
     return std::nullopt;
@@ -683,7 +1197,7 @@ std::optional<DeviceStatusInfo> get_device_status_info(unsigned int device_index
 }
 
 std::vector<std::optional<DeviceStatusInfo>> get_devices_status_info() {
-#if HAS_NVML
+#if HAS_NVML || HAS_RSMI
     std::vector<std::optional<DeviceStatusInfo>> result{};
     const auto max_devices = get_device_count();
     for (unsigned int device_index{}; device_index < max_devices; ++device_index) {
@@ -700,12 +1214,14 @@ std::optional<std::string> get_nvidia_driver_version() {
         std::optional<std::string> version;
 #if HAS_NVML
         version = read_version_from_nvml();
-#endif  // HAS_NVML
-#if defined(__linux__)
+#elif HAS_RSMI
+        version = read_version_from_rsmi();
+#endif
+#if defined(__linux__) && !HAS_RSMI
         if (!version) {
             version = read_version_from_proc();
         }
-#endif  // __linux__
+#endif  // __linux__ && !HAS_RSMI
         return version;
     }();
     return cached_version;
@@ -714,6 +1230,8 @@ std::optional<std::string> get_nvidia_driver_version() {
 unsigned int get_device_count() {
 #if HAS_NVML
     return DeviceInfoCache::instance().get_device_count();
+#elif HAS_RSMI
+    return RsmiDeviceInfoCache::instance().get_device_count();
 #else
     return 0;
 #endif  // HAS_NVML
@@ -751,6 +1269,8 @@ std::optional<std::string> parse_nvidia_version_line(std::string_view line) {
 bool is_accessible_device([[maybe_unused]] unsigned int device_index) {
 #if HAS_NVML
     return DeviceInfoCache::instance().get_device_handle(device_index).has_value();
+#elif HAS_RSMI
+    return RsmiDeviceInfoCache::instance().is_device_accessible(device_index);
 #else
     return false;
 #endif  // HAS_NVML
