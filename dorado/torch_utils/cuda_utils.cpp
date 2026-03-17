@@ -398,7 +398,7 @@ void print_cuda_alloc_info(const std::string &label) {
 size_t available_memory(torch::Device device) {
     size_t free, total;
 #if DORADO_ROCM_BUILD
-    c10::hip::HIPGuard device_guard(c10::Device(c10::DeviceType::HIP, device.index()));
+    c10::hip::HIPGuard device_guard(device.index());
     hipMemGetInfo(&free, &total);
 #else
     c10::cuda::CUDAGuard device_guard(device);

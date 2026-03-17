@@ -27,7 +27,7 @@ DecodeData CUDADecoder::beam_search_part_1(DecodeData data) const {
     auto &options = data.options;
 
 #if DORADO_ROCM_BUILD
-    c10::hip::HIPGuard device_guard(scores.device());
+    c10::hip::HIPGuard device_guard(scores.device().index());
 #else
     c10::cuda::CUDAGuard device_guard(scores.device());
 #endif

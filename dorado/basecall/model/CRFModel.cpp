@@ -60,7 +60,7 @@ void CRFModelImpl::load_state_dict(const std::vector<at::Tensor> &weights) {
 at::Tensor CRFModelImpl::run_koi(const at::Tensor &in) {
     // Input is [N, C, T] -- TODO: change to [N, T, C] on the input buffer side?
 #if DORADO_ROCM_BUILD
-    c10::hip::HIPGuard device_guard(in.device());
+    c10::hip::HIPGuard device_guard(in.device().index());
 #else
     c10::cuda::CUDAGuard device_guard(in.device());
 #endif

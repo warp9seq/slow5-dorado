@@ -63,7 +63,7 @@ ModBaseCaller::ModBaseData::ModBaseData(const config::ModBaseModelConfig& config
 #if DORADO_CUDA_BUILD
     if (opts.device().is_cuda()) {
 #if DORADO_ROCM_BUILD
-        c10::hip::HIPGuard device_guard(opts.device());
+        c10::hip::HIPGuard device_guard(opts.device().index());
         stream = c10::hip::getStreamFromPool(false, opts.device().index());
 #else
         c10::cuda::CUDAGuard device_guard(opts.device());

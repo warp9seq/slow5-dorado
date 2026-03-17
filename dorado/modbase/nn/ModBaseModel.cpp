@@ -500,7 +500,7 @@ struct ModBaseConvLSTMV3CUDAModelImpl : Module {
         utils::ScopedProfileRange spr("mbv3 koi", 1);
 
 #if DORADO_ROCM_BUILD
-        c10::hip::HIPGuard device_guard(sigs_N1T.device());
+        c10::hip::HIPGuard device_guard(sigs_N1T.device().index());
 #else
         c10::cuda::CUDAGuard device_guard(sigs_N1T.device());
 #endif

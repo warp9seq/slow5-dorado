@@ -130,7 +130,7 @@ PolisherResources create_resources(const secondary::ModelConfig& model_config,
 #if DORADO_CUDA_BUILD
                 if (device_info.device.is_cuda()) {
 #if DORADO_ROCM_BUILD
-                    c10::hip::HIPGuard device_guard(device_info.device);
+                    c10::hip::HIPGuard device_guard(device_info.device.index());
                     stream = c10::hip::getStreamFromPool(false, device_info.device.index());
 #else
                     c10::cuda::CUDAGuard device_guard(device_info.device);
@@ -170,7 +170,7 @@ PolisherResources create_resources(const secondary::ModelConfig& model_config,
 #if DORADO_CUDA_BUILD
                 if (device_info.device.is_cuda()) {
 #if DORADO_ROCM_BUILD
-                    c10::hip::HIPGuard device_guard(device_info.device);
+                    c10::hip::HIPGuard device_guard(device_info.device.index());
                     stream = c10::hip::getStreamFromPool(false, device_info.device.index());
 #else
                     c10::cuda::CUDAGuard device_guard(device_info.device);

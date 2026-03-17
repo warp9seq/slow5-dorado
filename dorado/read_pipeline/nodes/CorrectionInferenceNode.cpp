@@ -176,7 +176,7 @@ void CorrectionInferenceNode::infer_fn(const std::string& device_str, int mtx_id
     c10::optional<c10::Stream> stream;
     if (device.is_cuda()) {
 #if DORADO_ROCM_BUILD
-        c10::hip::HIPGuard device_guard(device);
+        c10::hip::HIPGuard device_guard(device.index());
         stream = c10::hip::getStreamFromPool(false, device.index());
 #else
         c10::cuda::CUDAGuard device_guard(device);

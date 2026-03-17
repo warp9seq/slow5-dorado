@@ -99,7 +99,7 @@ void emit_benchmark_file(const std::string &gpu_name,
 
 #if DORADO_ROCM_BUILD
 c10::hip::HIPStream get_stream_for_device(c10::Device device) {
-    c10::hip::HIPGuard device_guard(device);
+    c10::hip::HIPGuard device_guard(device.index());
     return c10::hip::getStreamFromPool(false, device.index());
 }
 #else
@@ -156,7 +156,7 @@ CudaCaller::CudaCaller(const BasecallerCreationParams &params)
     determine_batch_dims(params);
 
 #if DORADO_ROCM_BUILD
-    c10::hip::HIPGuard device_guard(m_options.device());
+    c10::hip::HIPGuard device_guard(m_options.device().index());
     c10::hip::HIPCachingAllocator::emptyCache();
 #else
     c10::cuda::CUDAGuard device_guard(m_options.device());
@@ -324,7 +324,7 @@ void CudaCaller::determine_batch_dims(const BasecallerCreationParams &params) {
     auto requested_batch_size = m_config.basecaller.batch_size();
 
 #if DORADO_ROCM_BUILD
-    c10::hip::HIPGuard device_guard(m_options.device());
+    c10::hip::HIPGuard device_guard(m_options.device().index());
     c10::hip::HIPCachingAllocator::emptyCache();
 #else
     c10::cuda::CUDAGuard device_guard(m_options.device());
