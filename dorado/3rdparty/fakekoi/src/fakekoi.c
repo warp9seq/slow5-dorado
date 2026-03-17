@@ -1,4 +1,4 @@
-#include "openfish.h"
+#include "fakekoi.h"
 
 #include <stdio.h>
 
